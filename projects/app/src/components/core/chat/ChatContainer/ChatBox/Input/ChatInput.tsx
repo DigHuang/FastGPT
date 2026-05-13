@@ -36,6 +36,7 @@ const ChatInput = ({
   lastInteractive,
   onSendMessage,
   onStop,
+  onStopChat,
   TextareaDom,
   resetInputVal,
   chatForm
@@ -43,6 +44,7 @@ const ChatInput = ({
   lastInteractive?: WorkflowInteractiveResponseType;
   onSendMessage: SendPromptFnType;
   onStop: () => void;
+  onStopChat?: () => Promise<unknown>;
   TextareaDom: React.MutableRefObject<HTMLTextAreaElement | null>;
   resetInputVal: (val: ChatBoxInputType) => void;
   chatForm: UseFormReturn<ChatBoxInputFormType>;
@@ -119,7 +121,7 @@ const ChatInput = ({
   const handleSend = useCallback(
     async (val?: string) => {
       if (!canSendMessage) return;
-      const textareaValue = val || TextareaDom.current?.value || '';
+      const textareaValue = val ?? inputValue ?? '';
 
       onSendMessage({
         text: textareaValue.trim(),
@@ -128,16 +130,19 @@ const ChatInput = ({
       });
       replaceFiles([]);
     },
-    [TextareaDom, lastInteractive, canSendMessage, fileList, onSendMessage, replaceFiles]
+    [inputValue, lastInteractive, canSendMessage, fileList, onSendMessage, replaceFiles]
   );
   const { runAsync: handleStop, loading: isStopping } = useRequest(async () => {
     try {
       if (isChatting) {
-        await postStopV2Chat({
-          appId,
-          chatId,
-          outLinkAuthData
-        }).catch();
+        await (
+          onStopChat?.() ??
+          postStopV2Chat({
+            appId,
+            chatId,
+            outLinkAuthData
+          })
+        ).catch(() => {});
       }
     } finally {
       onStop();
@@ -205,23 +210,27 @@ const ChatInput = ({
             onKeyDown={(e) => {
               // enter send.(pc or iframe && enter and unPress shift)
               const isEnter = e.key === 'Enter';
-              if (isEnter && TextareaDom.current && (e.ctrlKey || e.altKey)) {
+              if (isEnter && (e.ctrlKey || e.altKey)) {
                 // Add a new line
-                const index = TextareaDom.current.selectionStart;
-                const val = TextareaDom.current.value;
-                TextareaDom.current.value = `${val.slice(0, index)}\n${val.slice(index)}`;
-                TextareaDom.current.selectionStart = index + 1;
-                TextareaDom.current.selectionEnd = index + 1;
+                const textarea = e.currentTarget;
+                const index = textarea.selectionStart;
+                const val = textarea.value;
+                const nextValue = `${val.slice(0, index)}\n${val.slice(index)}`;
+                textarea.value = nextValue;
+                setValue('input', nextValue);
+                textarea.selectionStart = index + 1;
+                textarea.selectionEnd = index + 1;
 
-                TextareaDom.current.style.height = textareaMinH;
-                TextareaDom.current.style.height = `${TextareaDom.current.scrollHeight}px`;
+                textarea.style.height = textareaMinH;
+                textarea.style.height = `${textarea.scrollHeight}px`;
 
                 return;
               }
 
               // Select all content
-              // @ts-ignore
-              e.key === 'a' && e.ctrlKey && e.target?.select();
+              if (e.key === 'a' && e.ctrlKey) {
+                e.currentTarget.select();
+              }
 
               if ((isPc || window !== parent) && e.keyCode === 13 && !e.shiftKey) {
                 handleSend();
@@ -364,9 +373,10 @@ const ChatInput = ({
               onClick={(e) => {
                 e.stopPropagation();
                 if (isChatting) {
-                  return handleStop();
+                  void handleStop();
+                  return;
                 }
-                return handleSend();
+                handleSend();
               }}
             >
               {isChatting ? (
