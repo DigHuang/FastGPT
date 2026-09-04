@@ -19,6 +19,7 @@ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
 import { checkTeamAppTypeLimit } from '@fastgpt/service/support/permission/teamLimit';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { checkCreateFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import {
   CreateAppFolderBodySchema,
   CreateAppFolderResponseSchema,
@@ -49,25 +50,41 @@ async function handler(
 
   await checkTeamAppTypeLimit({ teamId, appCheckType: 'folder' });
 
-  await checkCreateFolderDepth({ parentId, teamId, model: MongoApp });
+  await checkCreateFolderDepth({
+    parentId,
+    teamId,
+    model: MongoApp,
+    isFolderType: (parentType) => parentType === type
+  });
 
   // Create app
   await mongoSessionRun(async (session) => {
-    const app = await MongoApp.create({
-      ...parseParentIdInMongo(parentId),
-      avatar: FolderImgUrl,
-      name,
-      intro,
-      teamId,
-      tmbId,
-      type
-    });
+    const [app] = await MongoApp.create(
+      [
+        {
+          ...parseParentIdInMongo(parentId),
+          avatar: FolderImgUrl,
+          name,
+          intro,
+          teamId,
+          tmbId,
+          type
+        }
+      ],
+      { session, ordered: true }
+    );
 
     await createResourceDefaultCollaborators({
       tmbId,
       session,
       resource: app,
       resourceType: PerResourceTypeEnum.app
+    });
+    await updateParentFoldersUpdateTime({
+      parentIds: [parentId],
+      teamId,
+      model: MongoApp,
+      session
     });
   });
   (async () => {

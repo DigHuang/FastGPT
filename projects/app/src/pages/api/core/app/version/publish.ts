@@ -16,7 +16,7 @@ import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
 import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
 import { getI18nAppType } from '@fastgpt/service/support/user/audit/util';
 import { i18nT } from '@fastgpt/global/common/i18n/utils';
-import { updateParentFoldersUpdateTime } from '@fastgpt/service/core/app/controller';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { extractAppResourceRefsFromNodes } from '@fastgpt/service/core/app/resourceRefs';
 import { formatModels } from '@fastgpt/global/core/workflow/utils';
@@ -64,10 +64,6 @@ async function handler(req: ApiRequestProps<PostPublishAppProps>) {
     });
   }
   const resourceRefs = extractAppResourceRefsFromNodes(normalizedWorkflow.nodes);
-  updateParentFoldersUpdateTime({
-    parentId: app.parentId
-  });
-
   if (autoSave) {
     await mongoSessionRun(async (session) => {
       await MongoAppVersion.updateOne(
@@ -101,6 +97,12 @@ async function handler(req: ApiRequestProps<PostPublishAppProps>) {
           session
         }
       );
+      await updateParentFoldersUpdateTime({
+        parentIds: [app.parentId],
+        teamId,
+        model: MongoApp,
+        session
+      });
     });
 
     addAuditLog({
@@ -166,6 +168,12 @@ async function handler(req: ApiRequestProps<PostPublishAppProps>) {
         session
       }
     );
+    await updateParentFoldersUpdateTime({
+      parentIds: [app.parentId],
+      teamId,
+      model: MongoApp,
+      session
+    });
   });
 
   (async () => {

@@ -9,6 +9,8 @@ import { MongoResourcePermission } from '@fastgpt/service/support/permission/sch
 import { getFakeUsers } from '@test/datas/users';
 import { Call } from '@test/utils/request';
 import { describe, it, expect } from 'vitest';
+import { CommonErrEnum } from '@fastgpt/global/common/error/code/common';
+import { MongoDataset } from '@fastgpt/service/core/dataset/schema';
 
 describe('create dataset', () => {
   it('should return 200 when create dataset success', async () => {
@@ -52,5 +54,31 @@ describe('create dataset', () => {
 
     expect(res2.error).toBeUndefined();
     expect(res2.code).toBe(200);
+  });
+
+  it('rejects a non-folder dataset as parent', async () => {
+    const users = await getFakeUsers(1);
+    const parent = await MongoDataset.create({
+      teamId: users.members[0].teamId,
+      tmbId: users.members[0].tmbId,
+      name: 'not-a-folder',
+      type: DatasetTypeEnum.dataset
+    });
+
+    const result = await Call<CreateDatasetBody, Record<string, never>, CreateDatasetResponse>(
+      createHandler,
+      {
+        auth: users.members[0],
+        body: {
+          name: 'invalid-child',
+          intro: '',
+          avatar: 'avatar',
+          type: DatasetTypeEnum.dataset,
+          parentId: String(parent._id)
+        }
+      }
+    );
+
+    expect(result.error).toBe(CommonErrEnum.invalidParams);
   });
 });

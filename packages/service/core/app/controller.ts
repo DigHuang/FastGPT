@@ -26,8 +26,6 @@ import { MongoAppChatLog } from './logs/chatLogsSchema';
 import { MongoAppRegistration } from '../../support/appRegistration/schema';
 import { MongoMcpKey } from '../../support/mcp/schema';
 import { MongoAppRecord } from './record/schema';
-import { mongoSessionRun } from '../../common/mongo/sessionRun';
-import { getLogger, LogCategories } from '../../common/logger';
 import { deleteAppSandboxes } from '../ai/sandbox/interface/resource/sourceCleanup';
 import { MongoSystemTool } from '../plugin/tool/systemToolSchema';
 import {
@@ -39,8 +37,6 @@ import { nodeInputIsReference } from '@fastgpt/global/core/workflow/utils';
 import { authSkillByTmbId } from '../../support/permission/skill/auth';
 import { ChatSourceTypeEnum } from '@fastgpt/global/core/chat/constants';
 import { deleteChatResourcesBySource } from '../chat/delete';
-
-const logger = getLogger(LogCategories.MODULE.APP.FOLDER);
 
 /**
  * 在更新应用前，对工作流节点数据进行格式化和安全处理。
@@ -351,26 +347,4 @@ export const deleteAppsImmediate = async ({
 
   // Remove app record
   await MongoAppRecord.deleteMany({ teamId, appId: { $in: appIds } });
-};
-
-export const updateParentFoldersUpdateTime = ({ parentId }: { parentId?: string | null }) => {
-  mongoSessionRun(async (session) => {
-    const existsId = new Set<string>();
-    while (true) {
-      if (!parentId || existsId.has(parentId)) return;
-
-      existsId.add(parentId);
-
-      const parentApp = await MongoApp.findById(parentId, 'parentId updateTime');
-      if (!parentApp) return;
-
-      parentApp.updateTime = new Date();
-      await parentApp.save({ session });
-
-      // 递归更新上层
-      parentId = parentApp.parentId;
-    }
-  }).catch((err) => {
-    logger.error('Failed to update parent folder updateTime', { error: err });
-  });
 };

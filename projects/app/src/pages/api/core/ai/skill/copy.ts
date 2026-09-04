@@ -8,11 +8,9 @@ import { authSkill } from '@fastgpt/service/support/permission/skill/auth';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { Types } from '@fastgpt/service/common/mongo';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
-import {
-  createSkill,
-  updateCurrentVersion,
-  updateParentFoldersUpdateTime
-} from '@fastgpt/service/core/ai/skill/manage';
+import { createSkill, updateCurrentVersion } from '@fastgpt/service/core/ai/skill/manage';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
+import { MongoAgentSkills } from '@fastgpt/service/core/ai/skill/model/schema';
 import { copySkillPackage, removeSkillPackageTTL } from '@fastgpt/service/core/ai/skill/package';
 import { createVersion } from '@fastgpt/service/core/ai/skill/version';
 import { MongoAgentSkillsVersion } from '@fastgpt/service/core/ai/skill/version/schema';
@@ -30,6 +28,8 @@ import {
 } from '@fastgpt/global/openapi/core/ai/skill/api';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { SkillErrEnum } from '@fastgpt/global/common/error/code/skill';
+import { checkParentFolderType } from '@fastgpt/service/common/parentFolder/depth';
+import { AgentSkillTypeEnum } from '@fastgpt/global/core/ai/skill/constants';
 
 async function handler(req: ApiRequestProps<CopySkillBody>): Promise<CopySkillResponse> {
   const { skillId } = parseApiInput({ req, bodySchema: CopySkillBodySchema }).body;
@@ -44,20 +44,29 @@ async function handler(req: ApiRequestProps<CopySkillBody>): Promise<CopySkillRe
   });
 
   // 2. Auth: require write permission on the parent folder, or team-level create permission for root
-  const { tmbId } = skill.parentId
-    ? await authSkill({
-        req,
-        skillId: String(skill.parentId),
-        per: WritePermissionVal,
-        authToken: true,
-        authApiKey: true
-      })
-    : await authUserPer({
+  const { tmbId } = await (async () => {
+    if (!skill.parentId) {
+      return authUserPer({
         req,
         authToken: true,
         authApiKey: true,
         per: TeamSkillCreatePermissionVal
       });
+    }
+
+    const result = await authSkill({
+      req,
+      skillId: String(skill.parentId),
+      per: WritePermissionVal,
+      authToken: true,
+      authApiKey: true
+    });
+    checkParentFolderType({
+      parentType: result.skill.type,
+      isFolderType: (type) => type === AgentSkillTypeEnum.folder
+    });
+    return result;
+  })();
 
   // 3. Append " Copy" suffix to the name; duplicate conflicts are handled by E11000 (see app/copy.ts)
   const copyName = `${skill.name} Copy`;
@@ -148,11 +157,15 @@ async function handler(req: ApiRequestProps<CopySkillBody>): Promise<CopySkillRe
 
     // Promote temporary avatar to permanent (remove TTL)
     await getS3AvatarSource().refreshAvatar(avatar, undefined, session);
+    await updateParentFoldersUpdateTime({
+      parentIds: [skill.parentId],
+      teamId,
+      model: MongoAgentSkills,
+      session
+    });
 
     return newId;
   });
-
-  updateParentFoldersUpdateTime({ parentId: skill.parentId ?? null });
 
   // 5. Audit log
   (async () => {

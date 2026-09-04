@@ -578,7 +578,6 @@ describe.sequential('resource permission inheritance', () => {
           parentId: child.parentId,
           inheritPermission: child.inheritPermission
         },
-        newParentId: String(newParent._id),
         resourceModel: MongoApp,
         resourceType: PerResourceTypeEnum.app,
         newParentCollaborators,
@@ -685,7 +684,6 @@ describe.sequential('resource permission inheritance', () => {
           parentId: child.parentId,
           inheritPermission: child.inheritPermission
         },
-        newParentId: undefined,
         resourceModel: MongoApp,
         resourceType: PerResourceTypeEnum.app,
         newParentCollaborators: [],

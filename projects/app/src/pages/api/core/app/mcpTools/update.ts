@@ -8,7 +8,7 @@ import { MongoApp } from '@fastgpt/service/core/app/schema';
 import { getMCPToolSetRuntimeNode } from '@fastgpt/global/core/app/tool/mcpTool/utils';
 import { MongoAppVersion } from '@fastgpt/service/core/app/version/schema';
 import { storeSecretValue } from '@fastgpt/service/common/secret/utils';
-import { updateParentFoldersUpdateTime } from '@fastgpt/service/core/app/controller';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import { beforeUpdateAppFormat } from '@fastgpt/service/core/app/controller';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
@@ -67,9 +67,12 @@ async function handler(
       },
       { session }
     );
-  });
-  updateParentFoldersUpdateTime({
-    parentId: app.parentId
+    await updateParentFoldersUpdateTime({
+      parentIds: [app.parentId],
+      teamId,
+      model: MongoApp,
+      session
+    });
   });
 
   return UpdateMcpToolsResponseSchema.parse(undefined);

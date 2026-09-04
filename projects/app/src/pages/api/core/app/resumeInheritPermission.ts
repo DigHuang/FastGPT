@@ -7,7 +7,6 @@ import {
 } from '@fastgpt/global/support/permission/constant';
 import { resumeInheritPermission } from '@fastgpt/service/support/permission/inheritPermission';
 import { MongoApp } from '@fastgpt/service/core/app/schema';
-import { AppFolderTypeList } from '@fastgpt/global/core/app/constants';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   ResumeInheritPermissionQuerySchema,
@@ -35,7 +34,6 @@ async function handler(
   if (app.parentId) {
     await resumeInheritPermission({
       resource: app,
-      folderTypeList: AppFolderTypeList,
       resourceType: PerResourceTypeEnum.app,
       resourceModel: MongoApp
     });

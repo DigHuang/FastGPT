@@ -1,11 +1,9 @@
 import { NextAPI } from '@/service/middleware/entry';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
-import {
-  createSkill,
-  updateParentFoldersUpdateTime,
-  updateSkillCreationFailed
-} from '@fastgpt/service/core/ai/skill/manage';
+import { createSkill, updateSkillCreationFailed } from '@fastgpt/service/core/ai/skill/manage';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
+import { MongoAgentSkills } from '@fastgpt/service/core/ai/skill/model/schema';
 import { addAgentSkillCreateJob } from '@fastgpt/service/core/ai/skill/manage/creation';
 import {
   CreateSkillBodySchema,
@@ -33,6 +31,7 @@ import type { ApiRequestProps } from '@fastgpt/next/type';
 import { SkillErrEnum } from '@fastgpt/global/common/error/code/skill';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { checkParentFolderType } from '@fastgpt/service/common/parentFolder/depth';
 
 const logger = getLogger(LogCategories.MODULE.AGENT_SKILLS.CREATION);
 
@@ -49,20 +48,29 @@ async function handler(req: ApiRequestProps<CreateSkillBody>): Promise<CreateSki
   const requestedDescription = description?.trim() || '';
 
   // Authenticate user: if parentId exists, verify parent folder permission
-  const { teamId, tmbId } = parentId
-    ? await authSkill({
-        req,
-        skillId: parentId,
-        per: WritePermissionVal,
-        authToken: true,
-        authApiKey: true
-      })
-    : await authUserPer({
+  const { teamId, tmbId } = await (async () => {
+    if (!parentId) {
+      return authUserPer({
         req,
         authToken: true,
         authApiKey: true,
         per: TeamSkillCreatePermissionVal
       });
+    }
+
+    const result = await authSkill({
+      req,
+      skillId: parentId,
+      per: WritePermissionVal,
+      authToken: true,
+      authApiKey: true
+    });
+    checkParentFolderType({
+      parentType: result.skill.type,
+      isFolderType: (type) => type === AgentSkillTypeEnum.folder
+    });
+    return result;
+  })();
 
   // Validate required fields
   if (requestedName.length === 0) {
@@ -109,11 +117,15 @@ async function handler(req: ApiRequestProps<CreateSkillBody>): Promise<CreateSki
     });
 
     await getS3AvatarSource().refreshAvatar(avatar, undefined, session);
+    await updateParentFoldersUpdateTime({
+      parentIds: [parentId],
+      teamId,
+      model: MongoAgentSkills,
+      session
+    });
 
     return newSkillId;
   });
-
-  updateParentFoldersUpdateTime({ parentId });
 
   const createJobData = {
     skillId,

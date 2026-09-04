@@ -2,7 +2,8 @@ import { NextAPI } from '@/service/middleware/entry';
 import { authSkill } from '@fastgpt/service/support/permission/skill/auth';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
-import { updateSkill, updateParentFoldersUpdateTime } from '@fastgpt/service/core/ai/skill/manage';
+import { updateSkill } from '@fastgpt/service/core/ai/skill/manage';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import { MongoAgentSkills } from '@fastgpt/service/core/ai/skill/model/schema';
 import {
   ManagePermissionVal,
@@ -17,11 +18,8 @@ import {
   AgentSkillCreationStatusEnum
 } from '@fastgpt/global/core/ai/skill/constants';
 import { SkillErrEnum } from '@fastgpt/global/common/error/code/skill';
-import {
-  syncChildrenPermission,
-  syncCollaborators
-} from '@fastgpt/service/support/permission/inheritPermission';
 import { getResourceOwnedClbs } from '@fastgpt/service/support/permission/controller';
+import { moveResourcePermissions } from '@fastgpt/service/support/permission/resourcePermissionService';
 import {
   UpdateSkillBodySchema,
   type UpdateSkillBody
@@ -33,6 +31,7 @@ import { isValidObjectId } from 'mongoose';
 import type { ApiRequestProps } from '@fastgpt/next/type';
 import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
 import { checkMoveFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
+import { normalizeParentId } from '@fastgpt/global/common/parentFolder/depth';
 
 async function handler(req: ApiRequestProps<UpdateSkillBody>) {
   const { skillId, name, description, category, avatar, parentId } = parseApiInput({
@@ -48,8 +47,6 @@ async function handler(req: ApiRequestProps<UpdateSkillBody>) {
     return Promise.reject(SkillErrEnum.invalidSkillId);
   }
 
-  const isMove = parentId !== undefined;
-
   // Fetch skill with basic read permission; finer-grained checks follow based on operation type
   const { teamId, tmbId, skill, permission } = await authSkill({
     req,
@@ -63,17 +60,32 @@ async function handler(req: ApiRequestProps<UpdateSkillBody>) {
     return Promise.reject(skill.creationError || SkillErrEnum.noStorage);
   }
 
+  const isMove =
+    parentId !== undefined && normalizeParentId(parentId) !== normalizeParentId(skill.parentId);
+  if (
+    parentId !== undefined &&
+    !isMove &&
+    name === undefined &&
+    description === undefined &&
+    category === undefined &&
+    avatar === undefined
+  ) {
+    return;
+  }
+  let targetFolderName = 'root';
+
   if (isMove) {
     // Move operation: check source folder, target folder, and root-level permissions
     if (parentId) {
       // Moving into a target folder: require manage permission on the destination folder
-      await authSkill({
+      const { skill: targetFolder } = await authSkill({
         req,
         skillId: parentId,
         per: ManagePermissionVal,
         authToken: true,
         authApiKey: true
       });
+      targetFolderName = targetFolder.name;
     }
 
     if (skill.parentId) {
@@ -148,9 +160,13 @@ async function handler(req: ApiRequestProps<UpdateSkillBody>) {
     await mongoSessionRun(async (session) => {
       await updateSkill(skillId, updateData, session);
       await getS3AvatarSource().refreshAvatar(avatar, skill.avatar, session);
+      await updateParentFoldersUpdateTime({
+        parentIds: [skill.parentId],
+        teamId,
+        model: MongoAgentSkills,
+        session
+      });
     });
-
-    updateParentFoldersUpdateTime({ parentId: skill.parentId ?? null });
 
     (async () => {
       addAuditLog({
@@ -162,54 +178,19 @@ async function handler(req: ApiRequestProps<UpdateSkillBody>) {
     })();
   } else {
     // Move operation: sync permissions and update parentId
-    let targetFolderName = 'root';
-    if (parentId) {
-      const targetFolder = await MongoAgentSkills.findById(parentId, 'name').lean();
-      if (targetFolder) targetFolderName = targetFolder.name;
-    }
-
     await mongoSessionRun(async (session) => {
-      const [parentClbs, oldParentClbs, oldResourceClbs] = await Promise.all([
-        getResourceOwnedClbs({
-          teamId,
-          resourceId: parentId,
-          resourceType: PerResourceTypeEnum.agentSkill,
-          session
-        }),
-        skill.parentId
-          ? getResourceOwnedClbs({
-              teamId,
-              resourceId: skill.parentId,
-              resourceType: PerResourceTypeEnum.agentSkill,
-              session
-            })
-          : Promise.resolve([]),
-        getResourceOwnedClbs({
-          teamId,
-          resourceId: skillId,
-          resourceType: PerResourceTypeEnum.agentSkill,
-          session
-        })
-      ]);
-
-      // Sync permission records for the skill itself
-      const newResourceClbs = await syncCollaborators({
-        resourceId: skillId,
+      const newParentCollaborators = await getResourceOwnedClbs({
+        teamId,
+        resourceId: parentId,
         resourceType: PerResourceTypeEnum.agentSkill,
-        collaborators: parentClbs,
-        oldParentCollaborators: oldParentClbs,
-        session,
-        teamId
+        session
       });
 
-      // Sync subtree permissions (only effective when the skill is a folder)
-      await syncChildrenPermission({
+      await moveResourcePermissions({
         resource: skill,
         resourceType: PerResourceTypeEnum.agentSkill,
         resourceModel: MongoAgentSkills,
-        folderTypeList: [AgentSkillTypeEnum.folder],
-        oldParentCollaborators: oldResourceClbs,
-        newParentCollaborators: newResourceClbs,
+        newParentCollaborators,
         session
       });
 
@@ -223,11 +204,13 @@ async function handler(req: ApiRequestProps<UpdateSkillBody>) {
         },
         { session }
       );
+      await updateParentFoldersUpdateTime({
+        parentIds: [skill.parentId, parentId],
+        teamId,
+        model: MongoAgentSkills,
+        session
+      });
     });
-
-    // Update updateTime on both old and new parent folders
-    updateParentFoldersUpdateTime({ parentId: skill.parentId ?? null });
-    updateParentFoldersUpdateTime({ parentId });
 
     (async () => {
       addAuditLog({

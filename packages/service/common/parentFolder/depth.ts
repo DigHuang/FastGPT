@@ -27,6 +27,19 @@ type FolderResourceModel = {
 
 type FolderTypeChecker = (type: string) => boolean;
 
+/** 校验已鉴权父资源的类型，供普通资源创建入口复用且避免再次查询数据库。 */
+export const checkParentFolderType = ({
+  parentType,
+  isFolderType
+}: {
+  parentType?: string;
+  isFolderType: FolderTypeChecker;
+}) => {
+  if (!parentType || !isFolderType(parentType)) {
+    throw CommonErrEnum.invalidParams;
+  }
+};
+
 type FolderDepthModelProps = {
   model: FolderResourceModel;
   teamId: string;
@@ -34,12 +47,14 @@ type FolderDepthModelProps = {
 
 type CheckCreateFolderDepthProps = FolderDepthModelProps & {
   parentId: ParentIdType;
+  isFolderType: FolderTypeChecker;
 };
 
 type CheckMoveFolderDepthProps = FolderDepthModelProps & {
   resourceId: string;
   targetParentId: ParentIdType;
   isFolderType: FolderTypeChecker;
+  isTargetFolderType?: FolderTypeChecker;
 };
 
 type DepthLimitOptions = {
@@ -56,9 +71,13 @@ const getParentFolderDepth = async ({
   parentId,
   teamId,
   model,
+  isFolderType,
   maxAllowedDepth,
   limitErr = CommonErrEnum.invalidParams
-}: FolderDepthModelProps & { parentId: ParentIdType } & DepthLimitOptions): Promise<number> => {
+}: FolderDepthModelProps & {
+  parentId: ParentIdType;
+  isFolderType?: FolderTypeChecker;
+} & DepthLimitOptions): Promise<number> => {
   if (!parentId) return 0;
 
   let depth = 0;
@@ -72,9 +91,13 @@ const getParentFolderDepth = async ({
     visited.add(currentId);
 
     const doc: FolderResourceDoc | null = await model
-      .findById(currentId, 'parentId teamId')
+      .findById(currentId, 'parentId teamId type')
       .lean<FolderResourceDoc>();
-    if (!doc || String(doc.teamId) !== String(teamId)) {
+    if (
+      !doc ||
+      String(doc.teamId) !== String(teamId) ||
+      (isFolderType && (!doc.type || !isFolderType(doc.type)))
+    ) {
       throw CommonErrEnum.invalidParams;
     }
 
@@ -180,13 +203,15 @@ const isInSubtree = async ({
 export const checkCreateFolderDepth = async ({
   parentId,
   teamId,
-  model
+  model,
+  isFolderType
 }: CheckCreateFolderDepthProps) => {
   const maxDepth = serviceEnv.MAX_FOLDER_DEPTH;
   await getParentFolderDepth({
     parentId,
     teamId,
     model,
+    isFolderType,
     maxAllowedDepth: maxDepth - 1,
     limitErr: CommonErrEnum.folderDepthLimit
   });
@@ -201,7 +226,8 @@ export const checkMoveFolderDepth = async ({
   targetParentId,
   teamId,
   model,
-  isFolderType
+  isFolderType,
+  isTargetFolderType = isFolderType
 }: CheckMoveFolderDepthProps) => {
   const maxDepth = serviceEnv.MAX_FOLDER_DEPTH;
 
@@ -213,6 +239,7 @@ export const checkMoveFolderDepth = async ({
     parentId: targetParentId,
     teamId,
     model,
+    isFolderType: isTargetFolderType,
     maxAllowedDepth: maxDepth,
     limitErr: CommonErrEnum.folderMoveDepthLimit
   });

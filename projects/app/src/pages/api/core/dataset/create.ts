@@ -32,6 +32,7 @@ import { getI18nDatasetType } from '@fastgpt/service/support/user/audit/util';
 import { createResourceDefaultCollaborators } from '@fastgpt/service/support/permission/controller';
 import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { checkParentFolderType } from '@fastgpt/service/common/parentFolder/depth';
 
 async function handler(req: ApiRequestProps): Promise<CreateDatasetResponse> {
   const {
@@ -50,20 +51,29 @@ async function handler(req: ApiRequestProps): Promise<CreateDatasetResponse> {
   } = parseApiInput({ req, bodySchema: CreateDatasetBodySchema }).body;
 
   // auth
-  const { teamId, tmbId, userId } = parentId
-    ? await authDataset({
-        req,
-        datasetId: parentId,
-        authToken: true,
-        authApiKey: true,
-        per: WritePermissionVal
-      })
-    : await authUserPer({
+  const { teamId, tmbId, userId } = await (async () => {
+    if (!parentId) {
+      return authUserPer({
         req,
         authToken: true,
         authApiKey: true,
         per: TeamDatasetCreatePermissionVal
       });
+    }
+
+    const result = await authDataset({
+      req,
+      datasetId: parentId,
+      authToken: true,
+      authApiKey: true,
+      per: WritePermissionVal
+    });
+    checkParentFolderType({
+      parentType: result.dataset.type,
+      isFolderType: (type) => type === DatasetTypeEnum.folder
+    });
+    return result;
+  })();
 
   // check model valid
   const vectorModelStore =

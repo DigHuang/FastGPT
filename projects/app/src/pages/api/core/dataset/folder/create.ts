@@ -46,18 +46,28 @@ async function handler(req: ApiRequestProps<CreateDatasetFolderBody>) {
 
   await checkTeamDatasetFolderLimit({ teamId });
 
-  await checkCreateFolderDepth({ parentId, teamId, model: MongoDataset });
+  await checkCreateFolderDepth({
+    parentId,
+    teamId,
+    model: MongoDataset,
+    isFolderType: (type) => type === DatasetTypeEnum.folder
+  });
 
   await mongoSessionRun(async (session) => {
-    const dataset = await MongoDataset.create({
-      ...parseParentIdInMongo(parentId),
-      avatar: FolderImgUrl,
-      name,
-      intro,
-      teamId,
-      tmbId,
-      type: DatasetTypeEnum.folder
-    });
+    const [dataset] = await MongoDataset.create(
+      [
+        {
+          ...parseParentIdInMongo(parentId),
+          avatar: FolderImgUrl,
+          name,
+          intro,
+          teamId,
+          tmbId,
+          type: DatasetTypeEnum.folder
+        }
+      ],
+      { session, ordered: true }
+    );
 
     await createResourceDefaultCollaborators({
       tmbId,

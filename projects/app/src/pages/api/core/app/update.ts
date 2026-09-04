@@ -7,16 +7,13 @@ import {
   ReadPermissionVal
 } from '@fastgpt/global/support/permission/constant';
 import { parseParentIdInMongo } from '@fastgpt/global/common/parentFolder/utils';
-import { CommonErrEnum } from '@fastgpt/global/common/error/code/common';
+import { normalizeParentId } from '@fastgpt/global/common/parentFolder/depth';
 import { type ApiRequestProps } from '@fastgpt/next/type';
-import {
-  syncChildrenPermission,
-  syncCollaborators
-} from '@fastgpt/service/support/permission/inheritPermission';
-import { AppFolderTypeList, AppTypeEnum } from '@fastgpt/global/core/app/constants';
+import { AppTypeEnum, ToolTypeList } from '@fastgpt/global/core/app/constants';
 import { type ClientSession } from 'mongoose';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 import { getResourceOwnedClbs } from '@fastgpt/service/support/permission/controller';
+import { moveResourcePermissions } from '@fastgpt/service/support/permission/resourcePermissionService';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { TeamAppCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
 import { AppErrEnum } from '@fastgpt/global/common/error/code/app';
@@ -25,7 +22,7 @@ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
 import { getI18nAppType } from '@fastgpt/service/support/user/audit/util';
 import { i18nT } from '@fastgpt/global/common/i18n/utils';
 import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
-import { updateParentFoldersUpdateTime } from '@fastgpt/service/core/app/controller';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { checkMoveFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
 import {
@@ -56,11 +53,6 @@ async function handler(req: ApiRequestProps<UpdateAppBodyType, UpdateAppQueryTyp
     bodySchema: UpdateAppBodySchema
   });
 
-  if (!appId) {
-    Promise.reject(CommonErrEnum.missingParams);
-  }
-  const isMove = parentId !== undefined;
-
   // this step is to get the app and its permission, and we will check the permission manually for
   // different cases
   const { app, permission, teamId, tmbId } = await authApp({
@@ -70,8 +62,17 @@ async function handler(req: ApiRequestProps<UpdateAppBodyType, UpdateAppQueryTyp
     per: ReadPermissionVal
   });
 
-  if (!app) {
-    Promise.reject(AppErrEnum.unExist);
+  const isMove =
+    parentId !== undefined && normalizeParentId(parentId) !== normalizeParentId(app.parentId);
+  if (
+    parentId !== undefined &&
+    !isMove &&
+    name === undefined &&
+    avatar === undefined &&
+    type === undefined &&
+    intro === undefined
+  ) {
+    return UpdateAppResponseSchema.parse(app);
   }
 
   let targetName = '';
@@ -117,13 +118,20 @@ async function handler(req: ApiRequestProps<UpdateAppBodyType, UpdateAppQueryTyp
         : app.type === AppTypeEnum.folder
           ? (type: string) => type === AppTypeEnum.folder
           : () => false;
+    const isTargetFolderType =
+      app.type === AppTypeEnum.toolFolder ||
+      app.type === AppTypeEnum.httpPlugin ||
+      ToolTypeList.some((type) => type === app.type)
+        ? (type: string) => type === AppTypeEnum.toolFolder
+        : (type: string) => type === AppTypeEnum.folder;
 
     await checkMoveFolderDepth({
       resourceId: appId,
       targetParentId: parentId,
       teamId: app.teamId,
       model: MongoApp,
-      isFolderType
+      isFolderType,
+      isTargetFolderType
     });
   }
 
@@ -148,20 +156,12 @@ async function handler(req: ApiRequestProps<UpdateAppBodyType, UpdateAppQueryTyp
       { session }
     );
 
-    if (isMove) {
-      // Update both old and new parent folders
-      updateParentFoldersUpdateTime({
-        parentId: app.parentId
-      });
-      updateParentFoldersUpdateTime({
-        parentId
-      });
-    } else {
-      // Update current parent folder
-      updateParentFoldersUpdateTime({
-        parentId: parentId || app.parentId
-      });
-    }
+    await updateParentFoldersUpdateTime({
+      parentIds: isMove ? [app.parentId, parentId] : [parentId || app.parentId],
+      teamId,
+      model: MongoApp,
+      session
+    });
 
     return result;
   };
@@ -170,54 +170,27 @@ async function handler(req: ApiRequestProps<UpdateAppBodyType, UpdateAppQueryTyp
   if (isMove) {
     await mongoSessionRun(async (session) => {
       // Inherit folder: Sync children permission and it's clbs
-      const [parentClbs, oldParentClbs, oldResourceClbs] = await Promise.all([
-        getResourceOwnedClbs({
-          teamId: app.teamId,
-          resourceId: parentId,
-          resourceType: PerResourceTypeEnum.app,
-          session
-        }),
-        app.parentId
-          ? getResourceOwnedClbs({
-              teamId: app.teamId,
-              resourceId: app.parentId,
-              resourceType: PerResourceTypeEnum.app,
-              session
-            })
-          : Promise.resolve([]),
-        getResourceOwnedClbs({
-          teamId: app.teamId,
-          resourceId: app._id,
-          resourceType: PerResourceTypeEnum.app,
-          session
-        })
-      ]);
-      // sync self
-      const newResourceClbs = await syncCollaborators({
-        resourceId: app._id,
+      const newParentCollaborators = await getResourceOwnedClbs({
+        teamId: app.teamId,
+        resourceId: parentId,
         resourceType: PerResourceTypeEnum.app,
-        collaborators: parentClbs,
-        oldParentCollaborators: oldParentClbs,
-        session,
-        teamId: app.teamId
+        session
       });
-      // sync the children
-      await syncChildrenPermission({
+
+      await moveResourcePermissions({
         resource: app,
         resourceType: PerResourceTypeEnum.app,
         resourceModel: MongoApp,
-        folderTypeList: AppFolderTypeList,
-        oldParentCollaborators: oldResourceClbs,
-        newParentCollaborators: newResourceClbs,
+        newParentCollaborators,
         session
       });
       logAppMove({ tmbId, teamId, app, targetName });
       return UpdateAppResponseSchema.parse(await onUpdate(session));
     });
   } else {
+    const result = await mongoSessionRun((session) => onUpdate(session));
     logAppUpdate({ tmbId, teamId, app, name, intro: intro ?? undefined });
-
-    return UpdateAppResponseSchema.parse(await onUpdate());
+    return UpdateAppResponseSchema.parse(result);
   }
 }
 

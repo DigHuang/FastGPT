@@ -5,10 +5,8 @@ import {
   WritePermissionVal
 } from '@fastgpt/global/support/permission/constant';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
-import {
-  createSkillFolder,
-  updateParentFoldersUpdateTime
-} from '@fastgpt/service/core/ai/skill/manage';
+import { createSkillFolder } from '@fastgpt/service/core/ai/skill/manage';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import { authSkill } from '@fastgpt/service/support/permission/skill/auth';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { createResourceDefaultCollaborators } from '@fastgpt/service/support/permission/controller';
@@ -23,6 +21,7 @@ import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { checkCreateFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
 import { MongoAgentSkills } from '@fastgpt/service/core/ai/skill/model/schema';
+import { AgentSkillTypeEnum } from '@fastgpt/global/core/ai/skill/constants';
 
 async function handler(req: ApiRequestProps<CreateSkillFolderBody>) {
   const { name, description, parentId } = parseApiInput({
@@ -50,7 +49,12 @@ async function handler(req: ApiRequestProps<CreateSkillFolderBody>) {
         per: TeamSkillCreatePermissionVal
       });
 
-  await checkCreateFolderDepth({ parentId, teamId, model: MongoAgentSkills });
+  await checkCreateFolderDepth({
+    parentId,
+    teamId,
+    model: MongoAgentSkills,
+    isFolderType: (type) => type === AgentSkillTypeEnum.folder
+  });
 
   // Create the folder within a transaction and copy collaborators from parent
   const folderId = await mongoSessionRun(async (session) => {
@@ -72,11 +76,15 @@ async function handler(req: ApiRequestProps<CreateSkillFolderBody>) {
       resource: folder,
       resourceType: PerResourceTypeEnum.agentSkill
     });
+    await updateParentFoldersUpdateTime({
+      parentIds: [parentId],
+      teamId,
+      model: MongoAgentSkills,
+      session
+    });
 
     return folder._id.toString();
   });
-
-  updateParentFoldersUpdateTime({ parentId });
 
   // Add audit log
   (async () => {

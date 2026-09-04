@@ -10,6 +10,7 @@ import { MongoAgentSkills } from '../model/schema';
 import { createVersion } from '../version';
 import { updateCurrentVersion } from './update';
 import type { Readable } from 'node:stream';
+import { updateParentFoldersUpdateTime } from '../../../../common/parentFolder/updateTime';
 
 type ImportSkillParams = {
   skill: SkillPackageType['skill'];
@@ -86,6 +87,12 @@ export async function importSkill({
       session
     );
     await removeSkillPackageTTL(storageInfo.key, session);
+    await updateParentFoldersUpdateTime({
+      parentIds: [parentId],
+      teamId,
+      model: MongoAgentSkills,
+      session
+    });
 
     return newSkillId;
   });

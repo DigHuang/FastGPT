@@ -7,7 +7,6 @@ import {
 } from '@fastgpt/global/support/permission/constant';
 import { resumeInheritPermission } from '@fastgpt/service/support/permission/inheritPermission';
 import { MongoDataset } from '@fastgpt/service/core/dataset/schema';
-import { DatasetTypeEnum } from '@fastgpt/global/core/dataset/constants';
 import {
   ResumeDatasetInheritPermissionBodySchema,
   type ResumeDatasetInheritPermissionBody
@@ -29,7 +28,6 @@ async function handler(req: ApiRequestProps<ResumeDatasetInheritPermissionBody>)
   if (dataset.parentId) {
     await resumeInheritPermission({
       resource: dataset,
-      folderTypeList: [DatasetTypeEnum.folder],
       resourceType: PerResourceTypeEnum.dataset,
       resourceModel: MongoDataset
     });

@@ -1,4 +1,3 @@
-import type { ParentIdType } from '@fastgpt/global/common/parentFolder/type';
 import { OwnerRoleVal, PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
 import type {
   CollaboratorIdType,
@@ -413,14 +412,12 @@ export const updateResourceCollaborators = async ({
 /** 移动资源时替换资源自身 ACL，并按新快照同步继承子树。 */
 export const moveResourcePermissions = async ({
   resource,
-  newParentId,
   resourceModel,
   resourceType,
   newParentCollaborators,
   session
 }: {
   resource: SyncChildrenPermissionResourceType;
-  newParentId?: ParentIdType;
   resourceModel: ResourceModel;
   resourceType: PerResourceTypeEnum;
   newParentCollaborators: CollaboratorItemType[];
@@ -465,7 +462,7 @@ export const moveResourcePermissions = async ({
     session
   });
 
-  return { newParentId, collaborators: newResourceCollaborators };
+  return { collaborators: newResourceCollaborators };
 };
 
 /** 恢复继承时保留相对当前父级独有的权限位，并同步整个子树。 */

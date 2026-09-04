@@ -7,7 +7,6 @@ import {
 } from '@fastgpt/global/support/permission/constant';
 import { resumeInheritPermission } from '@fastgpt/service/support/permission/inheritPermission';
 import { MongoAgentSkills } from '@fastgpt/service/core/ai/skill/model/schema';
-import { AgentSkillTypeEnum } from '@fastgpt/global/core/ai/skill/constants';
 import {
   ResumeSkillInheritPermissionQuerySchema,
   ResumeSkillInheritPermissionResponseSchema,
@@ -37,7 +36,6 @@ async function handler(
   if (skill.parentId) {
     await resumeInheritPermission({
       resource: skill,
-      folderTypeList: [AgentSkillTypeEnum.folder],
       resourceType: PerResourceTypeEnum.agentSkill,
       resourceModel: MongoAgentSkills
     });

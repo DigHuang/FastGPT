@@ -3,7 +3,7 @@ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { authSkill } from '@fastgpt/service/support/permission/skill/auth';
 import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
 import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
-import { importSkill, updateParentFoldersUpdateTime } from '@fastgpt/service/core/ai/skill/manage';
+import { importSkill } from '@fastgpt/service/core/ai/skill/manage';
 import {
   ImportSkillQuerySchema,
   ImportSkillResponseSchema,
@@ -20,6 +20,7 @@ import { SkillErrEnum } from '@fastgpt/global/common/error/code/skill';
 import type { ApiRequestProps } from '@fastgpt/next/type';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { getAgentSandboxSkillMaxBytes } from '@fastgpt/service/core/ai/sandbox/interface/config';
+import { checkParentFolderType } from '@fastgpt/service/common/parentFolder/depth';
 
 export const config = {
   api: {
@@ -46,20 +47,29 @@ async function handler(
   }
 
   // 在消费文件流前完成权限校验，避免未授权请求占用对象存储上传带宽。
-  const { teamId, tmbId } = query.parentId
-    ? await authSkill({
-        req,
-        authToken: true,
-        authApiKey: true,
-        skillId: query.parentId,
-        per: WritePermissionVal
-      })
-    : await authUserPer({
+  const { teamId, tmbId } = await (async () => {
+    if (!query.parentId) {
+      return authUserPer({
         req,
         authToken: true,
         authApiKey: true,
         per: TeamSkillCreatePermissionVal
       });
+    }
+
+    const result = await authSkill({
+      req,
+      authToken: true,
+      authApiKey: true,
+      skillId: query.parentId,
+      per: WritePermissionVal
+    });
+    checkParentFolderType({
+      parentType: result.skill.type,
+      isFolderType: (type) => type === AgentSkillTypeEnum.folder
+    });
+    return result;
+  })();
 
   const skillName = query.name?.trim() || filename.replace(/\.[^.]+$/, '').trim() || 'package';
 
@@ -76,8 +86,6 @@ async function handler(
     contentLength,
     parentId: query.parentId ?? null
   });
-
-  updateParentFoldersUpdateTime({ parentId: query.parentId });
 
   void addAuditLog({
     tmbId,

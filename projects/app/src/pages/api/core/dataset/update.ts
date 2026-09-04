@@ -15,10 +15,6 @@ import { DatasetTypeEnum, TrainingModeEnum } from '@fastgpt/global/core/dataset/
 import { type ClientSession } from 'mongoose';
 import { parseParentIdInMongo } from '@fastgpt/global/common/parentFolder/utils';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
-import {
-  syncChildrenPermission,
-  syncCollaborators
-} from '@fastgpt/service/support/permission/inheritPermission';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { TeamDatasetCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
 import { DatasetErrEnum } from '@fastgpt/global/common/error/code/dataset';
@@ -41,10 +37,12 @@ import {
 } from '@fastgpt/service/core/ai/model';
 import { computedCollectionChunkSettings } from '@fastgpt/global/core/dataset/training/utils';
 import { getResourceOwnedClbs } from '@fastgpt/service/support/permission/controller';
+import { moveResourcePermissions } from '@fastgpt/service/support/permission/resourcePermissionService';
 import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
 import { isInternalAddress, PRIVATE_URL_TEXT } from '@fastgpt/service/common/system/utils';
 import { checkMoveFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { normalizeParentId } from '@fastgpt/global/common/parentFolder/depth';
 
 // 更新知识库接口
 // 包括如下功能：
@@ -84,8 +82,6 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
     }
   }
 
-  const isMove = parentId !== undefined;
-
   const { dataset, permission, tmbId, teamId } = await authDataset({
     req,
     authToken: true,
@@ -93,6 +89,25 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
     datasetId: id,
     per: ReadPermissionVal
   });
+
+  const isMove =
+    parentId !== undefined && normalizeParentId(parentId) !== normalizeParentId(dataset.parentId);
+  if (
+    parentId !== undefined &&
+    !isMove &&
+    name === undefined &&
+    avatar === undefined &&
+    intro === undefined &&
+    agentModelId === undefined &&
+    vlmModelId === undefined &&
+    websiteConfig === undefined &&
+    externalReadUrl === undefined &&
+    apiDatasetServer === undefined &&
+    autoSync === undefined &&
+    rawChunkSettings === undefined
+  ) {
+    return;
+  }
 
   let targetName = '';
 
@@ -160,7 +175,7 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
     });
   }
 
-  updateTraining({
+  await updateTraining({
     teamId: dataset.teamId,
     datasetId: id,
     shouldReset: !!agentModelData
@@ -259,45 +274,18 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
 
   await mongoSessionRun(async (session) => {
     if (isMove) {
-      const [parentClbs, oldParentClbs, oldResourceClbs] = await Promise.all([
-        getResourceOwnedClbs({
-          teamId: dataset.teamId,
-          resourceId: parentId,
-          resourceType: PerResourceTypeEnum.dataset,
-          session
-        }),
-        dataset.parentId
-          ? getResourceOwnedClbs({
-              teamId: dataset.teamId,
-              resourceId: dataset.parentId,
-              resourceType: PerResourceTypeEnum.dataset,
-              session
-            })
-          : Promise.resolve([]),
-        getResourceOwnedClbs({
-          teamId: dataset.teamId,
-          resourceId: id,
-          resourceType: PerResourceTypeEnum.dataset,
-          session
-        })
-      ]);
-
-      const newResourceClbs = await syncCollaborators({
+      const newParentCollaborators = await getResourceOwnedClbs({
         teamId: dataset.teamId,
-        resourceId: id,
+        resourceId: parentId,
         resourceType: PerResourceTypeEnum.dataset,
-        collaborators: parentClbs,
-        oldParentCollaborators: oldParentClbs,
         session
       });
 
-      await syncChildrenPermission({
+      await moveResourcePermissions({
         resource: dataset,
         resourceType: PerResourceTypeEnum.dataset,
         resourceModel: MongoDataset,
-        folderTypeList: [DatasetTypeEnum.folder],
-        oldParentCollaborators: oldResourceClbs,
-        newParentCollaborators: newResourceClbs,
+        newParentCollaborators,
         session
       });
       logDatasetMove({ tmbId, teamId, dataset, targetName });

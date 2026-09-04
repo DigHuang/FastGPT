@@ -42,6 +42,7 @@ import { createCollectionAndInsertData } from '@fastgpt/service/core/dataset/col
 import { S3PrivateBucket } from '@fastgpt/service/common/s3/buckets/private';
 import { getFileS3Key } from '@fastgpt/service/common/s3/utils';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { checkParentFolderType } from '@fastgpt/service/common/parentFolder/depth';
 
 async function handler(req: ApiRequestProps): Promise<CreateDatasetWithFilesResponse> {
   const { datasetParams, files } = parseApiInput({
@@ -56,20 +57,29 @@ async function handler(req: ApiRequestProps): Promise<CreateDatasetWithFilesResp
     getOptionalLLMModelData({ modelId: agentModelId }) ?? getDefaultLLMModelData();
   const vlmModelData = getOptionalVlmModelData({ modelId: vlmModelId }) ?? getDefaultVLMModelData();
 
-  const { teamId, tmbId, userId } = parentId
-    ? await authDataset({
-        req,
-        datasetId: parentId,
-        authToken: true,
-        authApiKey: true,
-        per: WritePermissionVal
-      })
-    : await authUserPer({
+  const { teamId, tmbId, userId } = await (async () => {
+    if (!parentId) {
+      return authUserPer({
         req,
         authToken: true,
         authApiKey: true,
         per: TeamDatasetCreatePermissionVal
       });
+    }
+
+    const result = await authDataset({
+      req,
+      datasetId: parentId,
+      authToken: true,
+      authApiKey: true,
+      per: WritePermissionVal
+    });
+    checkParentFolderType({
+      parentType: result.dataset.type,
+      isFolderType: (type) => type === DatasetTypeEnum.folder
+    });
+    return result;
+  })();
 
   // check limit
   await checkTeamDatasetLimit(teamId);

@@ -35,9 +35,9 @@ import { MongoAppTemplate } from '@fastgpt/service/core/app/templates/templateSc
 import { isPluginSystemTemplate } from '@fastgpt/service/core/app/templates/register';
 import {
   beforeUpdateAppFormat,
-  validatePublishAppAgentSkillReadPermissions,
-  updateParentFoldersUpdateTime
+  validatePublishAppAgentSkillReadPermissions
 } from '@fastgpt/service/core/app/controller';
+import { updateParentFoldersUpdateTime } from '@fastgpt/service/common/parentFolder/updateTime';
 import { migrateWorkflowToCurrent } from '@fastgpt/global/core/workflow/migration';
 import { copyAvatarImage } from '@fastgpt/service/common/file/image/controller';
 import { extractAppResourceRefsFromNodes } from '@fastgpt/service/core/app/resourceRefs';
@@ -264,8 +264,11 @@ export const onCreateApp = async ({
 
     await getS3AvatarSource().refreshAvatar(_avatar, undefined, session);
 
-    updateParentFoldersUpdateTime({
-      parentId
+    await updateParentFoldersUpdateTime({
+      parentIds: [parentId],
+      teamId,
+      model: MongoApp,
+      session
     });
 
     (async () => {
