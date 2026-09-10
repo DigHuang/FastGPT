@@ -627,8 +627,7 @@ export const ArrayTagSelect = ({
                     >
                       <Checkbox
                         isChecked={isChecked}
-                        onChange={() => handleToggleOption(opt)}
-                        onClick={(e) => e.stopPropagation()}
+                        pointerEvents={'none'}
                         size={'sm'}
                         borderRadius={'xs'}
                         icon={<MyIcon name={'common/check'} w={'10px'} />}

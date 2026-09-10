@@ -107,7 +107,8 @@ const BatchSetCollectionTagItemSchema = z.object({
     description: 'add：必填标签值。remove：省略则移除整个标签；array 传入 string[] 时只移除这些选项'
   }),
   append: z.boolean().optional().meta({
-    description: '仅 number 类型的 add 生效：true 时把值累加到已有数字，缺省或 false 为覆盖'
+    description:
+      '仅 array 类型的 add 生效：true 时将选项追加到已有选项列表中（去重），缺省或 false 为覆盖'
   })
 });
 export type BatchSetCollectionTagItem = z.infer<typeof BatchSetCollectionTagItemSchema>;
