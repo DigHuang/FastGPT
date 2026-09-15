@@ -26,6 +26,7 @@ export const iconPaths = {
   'common/billing': () => import('./icons/common/billing.svg'),
   'common/calendar': () => import('./icons/common/calendar.svg'),
   'common/check': () => import('./icons/common/check.svg'),
+  'common/checkSquare': () => import('./icons/common/checkSquare.svg'),
   'common/checkSquareBroken': () => import('./icons/common/checkSquareBroken.svg'),
   'common/checkSquareBrokenPrimary': () => import('./icons/common/checkSquareBrokenPrimary.svg'),
   'common/checkSquareBrokenPrimaryHover': () =>
