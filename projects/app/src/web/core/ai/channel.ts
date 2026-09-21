@@ -11,8 +11,6 @@ import { REASONING_FIELD_MAPPING_CHANNEL_TYPES } from '@fastgpt/global/core/ai/c
 import { useUserStore } from '@/web/support/user/useUserStore';
 import type {
   AffectedModelsResponse,
-  BatchDeleteChannelsResponse,
-  BatchUpdateChannelStatusResponse,
   ChannelListItem,
   ChannelModelsResponse,
   CreateChannelResponse,
@@ -61,7 +59,7 @@ export const getChannelProviders = () =>
 /** FastGPT 渠道创建入口，创建前在目标 scope 内按展示名称检查重复 */
 export const postCreateChannel = async (
   data: CreateChannelProps & { groupType?: 'system' | 'team'; priority?: number }
-): Promise<void> => {
+): Promise<CreateChannelResponse> => {
   const groupType = data.groupType ?? getDefaultChannelScope();
   const name = data.name.trim();
   const channels = await getChannelList({ groupType });
@@ -69,7 +67,7 @@ export const postCreateChannel = async (
     return Promise.reject(i18nT('config_model:channel_name_duplicate'));
   }
 
-  await POST<CreateChannelResponse>('/core/ai/channel/create', {
+  return await POST<CreateChannelResponse>('/core/ai/channel/create', {
     groupType,
     type: data.type,
     name,
@@ -138,25 +136,6 @@ export const putChannel = (
 export const deleteChannel = (id: number, channelType?: 'system' | 'team') =>
   DELETE<DeleteChannelResponse>('/core/ai/channel/delete', {
     id,
-    channelType: channelType ?? getDefaultChannelScope()
-  });
-
-/** 批量删除渠道 */
-export const batchDeleteChannels = (ids: number[], channelType?: 'system' | 'team') =>
-  POST<BatchDeleteChannelsResponse>('/core/ai/channel/batchDelete', {
-    ids,
-    channelType: channelType ?? getDefaultChannelScope()
-  });
-
-/** 批量启停渠道 */
-export const batchUpdateChannelStatus = (
-  ids: number[],
-  status: 1 | 2,
-  channelType?: 'system' | 'team'
-) =>
-  POST<BatchUpdateChannelStatusResponse>('/core/ai/channel/batchStatus', {
-    ids,
-    status,
     channelType: channelType ?? getDefaultChannelScope()
   });
 

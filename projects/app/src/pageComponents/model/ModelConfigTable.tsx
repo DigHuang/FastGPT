@@ -17,17 +17,21 @@ import {
 } from '@chakra-ui/react';
 import { useClientTranslation } from '@fastgpt/web/i18n/useClientTranslation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
+import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import MyTag from '@fastgpt/web/components/common/Tag/index';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import {
   deleteSystemModel,
+  deleteSystemModels,
   getAdminModelConfig,
   getTestModel,
-  deleteSystemModels,
   putSystemModelsStatus
 } from '@/web/core/ai/config';
+import { getChannelList, putChannel } from '@/web/core/ai/channel';
+import { getModelCollaborators, updateModelCollaborators } from '@/web/common/system/api';
+import { LazyCollaboratorProvider } from '@/components/support/permission/MemberManager/context';
+import { ReadRoleVal } from '@fastgpt/global/support/permission/constant';
 import MyBox from '@fastgpt/web/components/common/MyBox';
 import MyIconButton from '@fastgpt/web/components/common/Icon/button';
 import { useUserStore } from '@/web/support/user/useUserStore';
@@ -68,6 +72,7 @@ const modelTableColumnWidth = {
   selection: '48px',
   billing: '250px',
   channels: '180px',
+  collaborators: '130px',
   active: '128px',
   actions: '160px'
 } as const;
@@ -117,7 +122,7 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
   const { userInfo } = useUserStore();
   const { feConfigs } = useSystemStore();
   const showBilling = !!feConfigs?.isPlus;
-  const tableColumnCount = showBilling ? 6 : 5;
+  const tableColumnCount = showBilling ? 7 : 6;
 
   const {
     data: adminConfig,
@@ -537,6 +542,7 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
                     <col />
                     {showBilling && <col style={{ width: modelTableColumnWidth.billing }} />}
                     <col style={{ width: modelTableColumnWidth.channels }} />
+                    <col style={{ width: modelTableColumnWidth.collaborators }} />
                     <col style={{ width: modelTableColumnWidth.active }} />
                     <col style={{ width: modelTableColumnWidth.actions }} />
                   </colgroup>
@@ -565,6 +571,7 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
                       </Th>
                       {showBilling && <Th fontSize="xs">{t('common:model.billing')}</Th>}
                       <Th fontSize="xs">{t('config_model:model.channels')}</Th>
+                      <Th fontSize="xs">{t('config_model:collaborators')}</Th>
                       <Th fontSize="xs">
                         <Box
                           cursor="pointer"
@@ -586,6 +593,7 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
                     <col />
                     {showBilling && <col style={{ width: modelTableColumnWidth.billing }} />}
                     <col style={{ width: modelTableColumnWidth.channels }} />
+                    <col style={{ width: modelTableColumnWidth.collaborators }} />
                     <col style={{ width: modelTableColumnWidth.active }} />
                     <col style={{ width: modelTableColumnWidth.actions }} />
                   </colgroup>
@@ -661,6 +669,38 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
                               onClick={() => setChannelModel(item)}
                             />
                           </Box>
+                        </Td>
+                        <Td fontSize={'sm'}>
+                          {item.scope === ModelScopeEnum.system ? (
+                            <MyTag type={'borderFill'} colorSchema={'gray'}>
+                              {t('config_model:system_model_tag')}
+                            </MyTag>
+                          ) : (
+                            <LazyCollaboratorProvider
+                              selectedHint={t('config_model:collaborators')}
+                              defaultRole={ReadRoleVal}
+                              onGetCollaboratorList={() => getModelCollaborators(item.modelId)}
+                              onUpdateCollaborators={({ collaborators }) =>
+                                updateModelCollaborators({
+                                  collaborators,
+                                  modelIds: [item.modelId]
+                                })
+                              }
+                              permission={userInfo?.team.permission!}
+                            >
+                              {({ onOpenManageModal }) => (
+                                <MyIconButton
+                                  icon={'common/settingLight'}
+                                  size="1rem"
+                                  tip={t('config_model:manage_collaborators')}
+                                  hoverColor={'blue.500'}
+                                  w="min-content"
+                                  data-row-action
+                                  onClick={onOpenManageModal}
+                                />
+                              )}
+                            </LazyCollaboratorProvider>
+                          )}
                         </Td>
                         <Td fontSize={'sm'}>
                           <Flex data-row-action w={'32px'} justifyContent={'center'}>
@@ -792,8 +832,37 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
           channels={channelList}
           selectedChannelIds={channelModel.channels.map((channel) => channel.id)}
           onClose={() => setChannelModel(undefined)}
-          onConfirm={async () => {
+          onConfirm={async (channelIds) => {
+            await runChannelMutation(async () => {
+              const channels = await getChannelList({ groupType: 'system' });
+              const currentAssociatedSet = new Set(channelModel.channels.map((c) => c.id));
+              const nextSelectedSet = new Set(channelIds);
+              const toAdd = channels.filter(
+                (c) => nextSelectedSet.has(c.id) && !currentAssociatedSet.has(c.id)
+              );
+              const toRemove = channels.filter(
+                (c) => !nextSelectedSet.has(c.id) && currentAssociatedSet.has(c.id)
+              );
+              await Promise.all([
+                ...toAdd.map((c) =>
+                  putChannel({
+                    ...c,
+                    models: Array.from(new Set([...(c.models || []), channelModel.model])),
+                    channelType: 'system'
+                  })
+                ),
+                ...toRemove.map((c) =>
+                  putChannel({
+                    ...c,
+                    models: (c.models || []).filter((m) => m !== channelModel.model),
+                    channelType: 'system'
+                  })
+                )
+              ]);
+            });
+            toast({ status: 'success', title: t('config_model:associate_success') });
             setChannelModel(undefined);
+            await refreshModels().catch(() => {});
           }}
         />
       )}

@@ -15,8 +15,6 @@ vi.mock('@fastgpt/service/thirdProvider/aiproxy/config', () => ({
 
 import { resetChannelCache } from '@fastgpt/service/core/ai/channel/cache';
 import {
-  batchDeleteGroupChannels,
-  batchUpdateGroupChannelStatus,
   createGroupChannel,
   createSystemChannel,
   deleteGroupChannel,
@@ -28,8 +26,6 @@ import {
   listGlobalGroupChannels,
   listGroupChannels,
   listSystemChannels,
-  requestBatchDeleteSystemChannels,
-  requestBatchUpdateSystemChannelStatus,
   searchChannelLogs,
   testGroupChannel,
   testSystemChannel,
@@ -156,45 +152,6 @@ describe('aiproxy channel admin client', () => {
     const res = await listAllSystemChannels();
     expect(res).toEqual([]);
     expect(axiosMock.mock.calls).toHaveLength(1);
-  });
-
-  it('system and group batch operations call the corresponding batch endpoints', async () => {
-    axiosMock.mockResolvedValue(okEnvelope(null));
-    const groupId = getSystemGroupId('tmb-a');
-
-    await requestBatchDeleteSystemChannels([101, 102]);
-    await requestBatchUpdateSystemChannelStatus([101, 102], 2);
-    await batchDeleteGroupChannels(groupId, [201, 202]);
-    await batchUpdateGroupChannelStatus(groupId, [201, 202], 1);
-
-    const calls = axiosMock.mock.calls.map((c) => ({
-      method: c[0].method,
-      url: c[0].url,
-      data: c[0].data
-    }));
-
-    expect(calls).toEqual([
-      {
-        method: 'post',
-        url: 'http://aiproxy.test/api/channels/batch_delete',
-        data: { ids: [101, 102] }
-      },
-      {
-        method: 'post',
-        url: 'http://aiproxy.test/api/channels/batch_status',
-        data: { ids: [101, 102], status: 2 }
-      },
-      {
-        method: 'post',
-        url: 'http://aiproxy.test/api/group/fastgpt%3Atmb%3Atmb-a/channels/batch_delete',
-        data: { ids: [201, 202] }
-      },
-      {
-        method: 'post',
-        url: 'http://aiproxy.test/api/group/fastgpt%3Atmb%3Atmb-a/channels/batch_status',
-        data: { ids: [201, 202], status: 1 }
-      }
-    ]);
   });
 
   it('queries system logs and preserves the system channel id', async () => {

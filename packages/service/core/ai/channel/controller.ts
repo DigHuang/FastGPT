@@ -9,10 +9,6 @@ import { getCachedModelHandle } from '../config/handle';
 import type { ChannelListItem } from '@fastgpt/global/openapi/core/ai/channel/api';
 import { getModelProviderMetadata } from '../../app/provider/controller';
 import {
-  batchDeleteGroupChannels,
-  batchUpdateGroupChannelStatus,
-  requestBatchDeleteSystemChannels,
-  requestBatchUpdateSystemChannelStatus,
   getRealtimeGroupChannels,
   getRealtimeSystemChannels,
   getSystemGroupId,
@@ -389,58 +385,6 @@ export const getGlobalGroupChannelList = async ({
       }),
       total
     };
-  } catch (error) {
-    return rejectNormalized(error);
-  }
-};
-
-export const batchDeleteMemberChannels = async ({
-  tmbId,
-  ids
-}: {
-  tmbId: string;
-  ids: number[];
-}): Promise<void> => {
-  try {
-    await batchDeleteGroupChannels(getSystemGroupId(tmbId), ids);
-  } catch (error) {
-    return rejectNormalized(error);
-  }
-};
-
-export const batchUpdateMemberChannelStatus = async ({
-  tmbId,
-  ids,
-  status
-}: {
-  tmbId: string;
-  ids: number[];
-  status: ChannelStatus;
-}): Promise<void> => {
-  try {
-    await batchUpdateGroupChannelStatus(getSystemGroupId(tmbId), ids, status);
-  } catch (error) {
-    return rejectNormalized(error);
-  }
-};
-
-export const batchDeleteSystemChannels = async ({ ids }: { ids: number[] }): Promise<void> => {
-  try {
-    await requestBatchDeleteSystemChannels(ids);
-  } catch (error) {
-    return rejectNormalized(error);
-  }
-};
-
-export const batchUpdateSystemChannelStatus = async ({
-  ids,
-  status
-}: {
-  ids: number[];
-  status: ChannelStatus;
-}): Promise<void> => {
-  try {
-    await requestBatchUpdateSystemChannelStatus(ids, status);
   } catch (error) {
     return rejectNormalized(error);
   }

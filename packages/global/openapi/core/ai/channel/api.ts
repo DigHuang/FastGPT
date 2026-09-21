@@ -95,37 +95,6 @@ export const DeleteChannelResponseSchema = z.object({
 });
 export type DeleteChannelResponse = z.infer<typeof DeleteChannelResponseSchema>;
 
-// ═══ POST /api/core/ai/channel/batchDelete ═══
-export const BatchDeleteChannelsBodySchema = z.object({
-  ids: z.array(z.number().int()).min(1).meta({ description: '待批量删除的渠道 ID 列表' }),
-  channelType: ChannelTypeEnumSchema.meta({
-    description: 'system=系统渠道（root 专用）；team=成员渠道'
-  })
-});
-export type BatchDeleteChannelsBody = z.infer<typeof BatchDeleteChannelsBodySchema>;
-
-export const BatchDeleteChannelsResponseSchema = z
-  .undefined()
-  .meta({ description: '批量删除成功' });
-export type BatchDeleteChannelsResponse = z.infer<typeof BatchDeleteChannelsResponseSchema>;
-
-// ═══ POST /api/core/ai/channel/batchStatus ═══
-export const BatchUpdateChannelStatusBodySchema = z.object({
-  ids: z.array(z.number().int()).min(1).meta({ description: '待批量更新状态的渠道 ID 列表' }),
-  status: z.union([z.literal(1), z.literal(2)]).meta({ description: '1=启用 / 2=禁用' }),
-  channelType: ChannelTypeEnumSchema.meta({
-    description: 'system=系统渠道（root 专用）；team=成员渠道'
-  })
-});
-export type BatchUpdateChannelStatusBody = z.infer<typeof BatchUpdateChannelStatusBodySchema>;
-
-export const BatchUpdateChannelStatusResponseSchema = z
-  .undefined()
-  .meta({ description: '批量更新状态成功' });
-export type BatchUpdateChannelStatusResponse = z.infer<
-  typeof BatchUpdateChannelStatusResponseSchema
->;
-
 // ═══ POST /api/core/ai/channel/status ═══
 // POST carries id + status in the body (no GET-style query precedent exists for status ops).
 export const UpdateChannelStatusBodySchema = z.object({

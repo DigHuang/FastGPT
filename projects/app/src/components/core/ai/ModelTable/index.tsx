@@ -10,7 +10,6 @@ import { useUserStore } from '@/web/support/user/useUserStore';
 import {
   Box,
   Button,
-  Checkbox,
   Flex,
   HStack,
   ModalBody,
@@ -37,7 +36,6 @@ import MyTag from '@fastgpt/web/components/common/Tag/index';
 import { FixedTableLayout } from '@fastgpt/web/components/common/FixedTable';
 import { useStaticVirtualList } from '@fastgpt/web/hooks/useVirtualList';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
-import { useTableMultipleSelect } from '@fastgpt/web/hooks/useTableMultipleSelect';
 import { useClientTranslation } from '@fastgpt/web/i18n/useClientTranslation';
 import dynamic from 'next/dynamic';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -45,16 +43,19 @@ import ModelListFilters from '../ModelListFilters';
 import ModelCapabilityTags from '../ModelCapabilityTags';
 import PriceTiersLabel from '../PriceTiersLabel';
 import TestModeBetaTag from '../TestModeBetaTag';
+import ModelTabHeader from '@/pageComponents/model/ModelTabHeader';
 
 const MyModal = dynamic(() => import('@fastgpt/web/components/common/MyModal'));
 const modelRowHeight = 80;
 
 const ModelTable = ({
   permissionConfig = false,
-  contentPx
+  contentPx,
+  Tab
 }: {
   permissionConfig?: boolean;
   contentPx?: FlexProps['px'];
+  Tab?: React.ReactNode;
 }) => {
   const { t, i18n } = useClientTranslation();
   const { modelProviders: memberModelProviders, getModelProvider: getMemberModelProvider } =
@@ -262,21 +263,9 @@ const ModelTable = ({
   }, [modelType, provider, search, scrollToTop]);
   const tableColumnCount = permissionConfig && userInfo?.team.permission.hasManagePer ? 4 : 3;
 
-  const {
-    selectedItems,
-    toggleSelect,
-    isSelected,
-    getRowSelectionProps,
-    FloatingActionBar,
-    isSelecteAll,
-    selectAllTrigger
-  } = useTableMultipleSelect({
-    list: modelList,
-    getItemId: (e) => e.name
-  });
-
   return (
     <Flex flexDirection={'column'} h={contentPx === undefined ? '100%' : ['auto', '100%']} minW={0}>
+      {Tab && <ModelTabHeader Tab={Tab} px={contentPx} mb={4} />}
       <ModelListFilters
         px={contentPx}
         providers={providers}
@@ -321,18 +310,7 @@ const ModelTable = ({
             </colgroup>
             <Thead>
               <Tr color={'myGray.600'}>
-                <Th fontSize={'xs'}>
-                  <HStack>
-                    {permissionConfig && userInfo?.team.permission.hasManagePer && (
-                      <Checkbox
-                        mr={1}
-                        isChecked={isSelecteAll}
-                        onChange={selectAllTrigger}
-                      ></Checkbox>
-                    )}
-                    <Box>{t('common:model.name')}</Box>
-                  </HStack>
-                </Th>
+                <Th fontSize={'xs'}>{t('common:model.name')}</Th>
                 <Th fontSize={'xs'}>{t('common:model.model_type')}</Th>
                 <Th fontSize={'xs'}>{t('common:model.billing')}</Th>
                 {permissionConfig && userInfo?.team.permission.hasManagePer && (
@@ -368,19 +346,9 @@ const ModelTable = ({
                   h={`${modelRowHeight}px`}
                   sx={{ '& > td': { py: 2, whiteSpace: 'nowrap' } }}
                   _hover={{ bg: 'myGray.50' }}
-                  {...getRowSelectionProps(item, {
-                    isDisabled: !permissionConfig || !userInfo?.team.permission.hasManagePer
-                  })}
                 >
                   <Td fontSize={'sm'}>
                     <HStack>
-                      {permissionConfig && userInfo?.team.permission.hasManagePer && (
-                        <Checkbox
-                          mr={1}
-                          isChecked={isSelected(item)}
-                          onChange={() => toggleSelect(item)}
-                        ></Checkbox>
-                      )}
                       <Avatar src={item.avatar} w={'1.2rem'} />
                       <Flex alignItems={'center'} gap={1} minW={0}>
                         <CopyBox value={item.name} data-row-action color={'myGray.900'}>
@@ -446,38 +414,6 @@ const ModelTable = ({
             </Tbody>
           </Table>
         )}
-        footer={
-          <FloatingActionBar
-            activedStyles={{
-              borderRadius: 'md',
-              boxShadow: 'md'
-            }}
-            Controler={
-              <LazyCollaboratorProvider
-                selectedHint={modelPermissionConfigHint}
-                defaultRole={ReadRoleVal}
-                onGetCollaboratorList={() =>
-                  Promise.resolve({
-                    clbs: []
-                  })
-                }
-                onUpdateCollaborators={({ collaborators }) =>
-                  updateModelCollaborators({
-                    collaborators,
-                    modelIds: selectedItems.map((item) => getPermissionModelId(item.modelId))
-                  })
-                }
-                permission={userInfo?.team.permission!}
-              >
-                {({ onOpenManageModal }) => (
-                  <Button variant={'whiteBase'} onClick={onOpenManageModal}>
-                    {t('common:permission.Permission config')}
-                  </Button>
-                )}
-              </LazyCollaboratorProvider>
-            }
-          ></FloatingActionBar>
-        }
       />
     </Flex>
   );

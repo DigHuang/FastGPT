@@ -232,12 +232,14 @@ const ModelTypeSelector = ({
  */
 export const BlankModelCreateModal = ({
   createModelData,
+  defaultModelData,
   providers,
   channels,
   onSuccess,
   onClose
 }: {
   createModelData: (type: ModelTypeEnum) => SystemModelDocumentDataType;
+  defaultModelData?: SystemModelDocumentDataType;
   providers: ModelProviderItemType[];
   channels: AdminModelChannel[];
   onSuccess: () => unknown | Promise<unknown>;
@@ -245,16 +247,21 @@ export const BlankModelCreateModal = ({
 }) => {
   const { t } = useClientTranslation('config_model');
   const router = useRouter();
-  const [step, setStep] = useState<'type' | 'config'>('type');
-  const [selectedType, setSelectedType] = useState<ModelTypeEnum>(ModelTypeEnum.llm);
+  const [step, setStep] = useState<'type' | 'config'>(defaultModelData ? 'config' : 'type');
+  const [selectedType, setSelectedType] = useState<ModelTypeEnum>(
+    defaultModelData?.type ?? ModelTypeEnum.llm
+  );
   const [submitting, setSubmitting] = useState(false);
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<number>>(new Set());
   const [showAssociateChannel, setShowAssociateChannel] = useState(false);
   const [showCreateChannel, setShowCreateChannel] = useState(false);
-  const [draftModel, setDraftModel] = useState('');
+  const [draftModel, setDraftModel] = useState(defaultModelData?.model ?? '');
   const [isFormDirty, setIsFormDirty] = useState(false);
   const modelFormGetValuesRef = useRef<ModelConfigFormGetValues | null>(null);
-  const modelData = useMemo(() => createModelData(selectedType), [createModelData, selectedType]);
+  const modelData = useMemo(
+    () => defaultModelData ?? createModelData(selectedType),
+    [defaultModelData, createModelData, selectedType]
+  );
   const { openConfirm: openLeaveConfirm, ConfirmModal: LeaveConfirmModal } = useConfirm();
 
   const { testingChannelIds, testModelChannel: handleTestModelChannel } = useModelChannelTest({
@@ -311,9 +318,15 @@ export const BlankModelCreateModal = ({
             </>
           ) : (
             <>
-              <Button type="button" variant="whiteBase" size="md" onClick={() => setStep('type')}>
-                {t('config_model:previous_step')}
-              </Button>
+              {defaultModelData ? (
+                <Button variant="whiteBase" size="md" onClick={onClose}>
+                  {t('common:Cancel')}
+                </Button>
+              ) : (
+                <Button type="button" variant="whiteBase" size="md" onClick={() => setStep('type')}>
+                  {t('config_model:previous_step')}
+                </Button>
+              )}
               <Button
                 key="create-model"
                 size="md"
@@ -427,13 +440,15 @@ const TemplateCreateModal = ({
   channels,
   onClose,
   onSuccess,
-  onRefresh
+  onRefresh,
+  onSelectSingleTemplate
 }: {
   installedModels: SystemModelDataType[];
   channels: AdminModelChannel[];
   onClose: () => void;
   onSuccess: () => Promise<void>;
   onRefresh?: () => Promise<void>;
+  onSelectSingleTemplate?: (template: SystemModelDocumentDataType) => void;
 }) => {
   const { t, i18n } = useClientTranslation('config_model');
   const [step, setStep] = useState<1 | 2>(1);
@@ -561,7 +576,16 @@ const TemplateCreateModal = ({
             <Button variant="whiteBase" onClick={onClose}>
               {t('common:Cancel')}
             </Button>
-            <Button isDisabled={selectedKeys.size === 0} onClick={() => setStep(2)}>
+            <Button
+              isDisabled={selectedKeys.size === 0}
+              onClick={() => {
+                if (selectedTemplates.length === 1 && onSelectSingleTemplate) {
+                  onSelectSingleTemplate(selectedTemplates[0]);
+                } else {
+                  setStep(2);
+                }
+              }}
+            >
               {t('config_model:next_step')}
             </Button>
           </>
@@ -816,6 +840,9 @@ const AddModel = ({
 } & ButtonProps) => {
   const [showBlankCreate, setShowBlankCreate] = useState(false);
   const [showTemplateCreate, setShowTemplateCreate] = useState(false);
+  const [templateForConfig, setTemplateForConfig] = useState<SystemModelDocumentDataType | null>(
+    null
+  );
   const getBlankModelData = useCallback(
     (type: ModelTypeEnum) => createBlankSystemModelData({ type }),
     []
@@ -838,6 +865,19 @@ const AddModel = ({
           onSuccess={onSuccess}
         />
       )}
+      {templateForConfig && (
+        <BlankModelCreateModal
+          createModelData={getBlankModelData}
+          defaultModelData={templateForConfig}
+          providers={providers}
+          channels={channels}
+          onClose={() => setTemplateForConfig(null)}
+          onSuccess={async () => {
+            setTemplateForConfig(null);
+            await onSuccess();
+          }}
+        />
+      )}
       {showTemplateCreate && (
         <TemplateCreateModal
           installedModels={installedModels}
@@ -845,6 +885,10 @@ const AddModel = ({
           onClose={() => setShowTemplateCreate(false)}
           onSuccess={onSuccess}
           onRefresh={onSuccess}
+          onSelectSingleTemplate={(template) => {
+            setShowTemplateCreate(false);
+            setTemplateForConfig(template);
+          }}
         />
       )}
     </>

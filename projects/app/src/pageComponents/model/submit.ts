@@ -45,6 +45,7 @@ export const submitUpdatedSystemModel = async ({
   const normalizedModelData = normalizeModelPricingForSave(modelData);
 
   const input = UpdateSystemModelBodySchema.parse({
+    modelId,
     modelData: {
       ...normalizedModelData,
       model: normalizedModelData.model.trim()

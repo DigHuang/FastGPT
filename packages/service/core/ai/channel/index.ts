@@ -34,10 +34,6 @@ export {
   getModelChannelRefs,
   getSystemChannelList,
   getMemberChannelList,
-  batchDeleteMemberChannels,
-  batchDeleteSystemChannels,
-  batchUpdateMemberChannelStatus,
-  batchUpdateSystemChannelStatus,
   getTmbNamesByTmbIds,
   getAdminAIProxyChannelItems
 } from './controller';

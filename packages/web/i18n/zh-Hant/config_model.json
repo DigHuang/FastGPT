@@ -1,4 +1,5 @@
 {
+  "active_model": "可用模型",
   "max_response_tokens": "最大回應 Tokens",
   "voices_array_required": "音色必須是非空陣列，且每項包含 label 和 value",
   "select_model_provider_placeholder": "請選擇提供商",
@@ -255,5 +256,11 @@
   "model_status_tip_checks_with_failed": "{{total}} 次探測，{{failed}} 次失敗",
   "model_status_test_webhook": "測試 Webhook",
   "model_status_test_webhook_success": "Webhook 測試成功，已發送異常與恢復通知",
-  "model_status_webhook_url_empty": "請先填寫告警 Webhook 地址"
+  "model_status_webhook_url_empty": "請先填寫告警 Webhook 地址",
+  "confirm_remove_channel_association": "是否解除關聯？解除後將從列表中移除",
+  "channel_disassociate_success": "已解除渠道關聯",
+  "channel_max_five_tip": "目前僅展示前 5 個渠道，點擊渠道數量可查看全部",
+  "collaborators": "協作者",
+  "manage_collaborators": "管理協作者",
+  "system_model_tag": "系統"
 }

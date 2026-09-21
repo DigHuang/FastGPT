@@ -35,7 +35,6 @@ const ModelEditModal = ({
     setDraftModel,
     modelFormGetValuesRef,
     selectedChannelIds,
-    setSelectedChannelIds,
     showCreateChannel,
     setShowCreateChannel,
     showAssociateChannel,
@@ -45,6 +44,8 @@ const ModelEditModal = ({
     testingChannelIds,
     setIsFormDirty,
     submitModel,
+    removeChannel,
+    associateChannels,
     refreshAfterChannelCreated,
     LeaveConfirmModal
   } = useModelEditWorkflow({ model, onSuccess, onClose });
@@ -100,13 +101,7 @@ const ModelEditModal = ({
                   onManage={goToChannelManagement}
                   onTest={(channelId) => void testModelChannel(channelId)}
                   testingChannelIds={testingChannelIds}
-                  onRemove={(channelId) =>
-                    setSelectedChannelIds((current) => {
-                      const next = new Set(current);
-                      next.delete(channelId);
-                      return next;
-                    })
-                  }
+                  onRemove={(channelId) => void removeChannel(channelId)}
                 />
               )
             }}
@@ -133,10 +128,7 @@ const ModelEditModal = ({
           ]}
           channels={detail.channels}
           selectedChannelIds={[...selectedChannelIds]}
-          onConfirm={(channelIds) => {
-            setSelectedChannelIds(new Set(channelIds));
-            setShowAssociateChannel(false);
-          }}
+          onConfirm={(channelIds) => associateChannels(channelIds)}
           onClose={() => setShowAssociateChannel(false)}
         />
       )}

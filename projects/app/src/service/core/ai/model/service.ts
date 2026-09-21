@@ -10,6 +10,30 @@ import {
   getSystemModelConfigUpdate,
   updateSystemModelConfig
 } from '@fastgpt/service/core/ai/config/service';
+import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
+import { upsertSystemDefaultModelIds } from '@fastgpt/service/core/ai/defaultModel/entity';
+import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
+import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
+import { PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
+import { UserError } from '@fastgpt/global/common/error/utils';
+import {
+  normalizeModelPricingForRead,
+  normalizeModelPricingForSave
+} from '@fastgpt/global/core/ai/model/pricing';
+import {
+  ImportedSystemModelSchema,
+  CreateSystemModelResponseSchema,
+  CreateSystemModelsFromTemplatesResponseSchema,
+  type CreateSystemModelBody,
+  type CreateSystemModelResponse,
+  type CreateSystemModelsFromTemplatesBody,
+  type CreateSystemModelsFromTemplatesResponse,
+  type DeleteSystemModelsBody,
+  type ParsedSystemModelsWithJsonBody,
+  type UpdateDefaultModelsBody,
+  type UpdateSystemModelBody
+} from '@fastgpt/global/openapi/admin/system/model/api';
+
 /** 更新系统模型配置，外部写入前检查目标实例、类型与新标识可用性。 */
 export const updateSystemModel = async ({
   modelId,

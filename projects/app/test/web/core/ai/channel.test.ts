@@ -35,8 +35,6 @@ vi.mock('@fastgpt/global/common/i18n/utils', () => ({
 }));
 
 import {
-  batchDeleteChannels,
-  batchUpdateChannelStatus,
   deleteChannel,
   getChannelList,
   getChannelLog,
@@ -247,27 +245,6 @@ describe('Channel Web Client API', () => {
       await deleteChannel(10);
       expect(mocks.DELETE).toHaveBeenCalledWith('/core/ai/channel/delete', {
         id: 10,
-        channelType: 'system'
-      });
-    });
-  });
-
-  describe('batch operations', () => {
-    it('calls /core/ai/channel/batchDelete', async () => {
-      mocks.POST.mockResolvedValueOnce(undefined);
-      await batchDeleteChannels([1, 2]);
-      expect(mocks.POST).toHaveBeenCalledWith('/core/ai/channel/batchDelete', {
-        ids: [1, 2],
-        channelType: 'system'
-      });
-    });
-
-    it('calls /core/ai/channel/batchStatus', async () => {
-      mocks.POST.mockResolvedValueOnce(undefined);
-      await batchUpdateChannelStatus([1, 2], 2);
-      expect(mocks.POST).toHaveBeenCalledWith('/core/ai/channel/batchStatus', {
-        ids: [1, 2],
-        status: 2,
         channelType: 'system'
       });
     });

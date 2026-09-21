@@ -2,10 +2,6 @@ import type { OpenAPIPath } from '../../../type';
 import { DevApiTagsMap } from '../../../tag';
 import {
   AffectedModelsResponseSchema,
-  BatchDeleteChannelsBodySchema,
-  BatchDeleteChannelsResponseSchema,
-  BatchUpdateChannelStatusBodySchema,
-  BatchUpdateChannelStatusResponseSchema,
   ChannelModelsResponseSchema,
   CreateChannelBodySchema,
   CreateChannelResponseSchema,
@@ -97,38 +93,6 @@ export const ChannelPath: OpenAPIPath = {
         200: {
           description: '删除成功，返回受影响模型清单',
           content: { 'application/json': { schema: DeleteChannelResponseSchema } }
-        }
-      }
-    }
-  },
-  '/core/ai/channel/batchDelete': {
-    post: {
-      summary: '批量删除渠道',
-      description: '对接 AI Proxy 原生 batch_delete 批量删除渠道。',
-      tags: [DevApiTagsMap.model],
-      requestBody: {
-        content: { 'application/json': { schema: BatchDeleteChannelsBodySchema } }
-      },
-      responses: {
-        200: {
-          description: '批量删除成功',
-          content: { 'application/json': { schema: BatchDeleteChannelsResponseSchema } }
-        }
-      }
-    }
-  },
-  '/core/ai/channel/batchStatus': {
-    post: {
-      summary: '批量更新渠道状态',
-      description: '对接 AI Proxy 原生 batch_status 批量启用或禁用渠道。',
-      tags: [DevApiTagsMap.model],
-      requestBody: {
-        content: { 'application/json': { schema: BatchUpdateChannelStatusBodySchema } }
-      },
-      responses: {
-        200: {
-          description: '批量更新状态成功',
-          content: { 'application/json': { schema: BatchUpdateChannelStatusResponseSchema } }
         }
       }
     }
