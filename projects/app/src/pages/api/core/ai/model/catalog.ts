@@ -1,9 +1,9 @@
-import { getModelHandle } from '@fastgpt/service/core/ai/model';
+import { getTeamModelHandle } from '@fastgpt/service/core/ai/model/index';
 import { getModelProviderMetadata } from '@fastgpt/service/core/ai/model/provider/controller';
 import { authModelViewer } from '@/service/core/ai/model/auth';
 import type { ApiRequestProps } from '@fastgpt/next/type';
 import { NextAPI } from '@/service/middleware/entry';
-import { getMemberModelCatalogPermission } from '@fastgpt/service/support/permission/model/controller';
+import { getMemberModelCatalogPermission } from '@fastgpt/service/support/permission/model/catalog';
 import {
   GetModelCatalogQuerySchema,
   GetModelCatalogResponseSchema,
@@ -12,8 +12,8 @@ import {
 } from '@fastgpt/global/openapi/core/ai/model/api';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { desensitizeSystemModel } from '@fastgpt/service/core/ai/model/transform';
-import { resolveEffectiveDefaultModelIds } from '@fastgpt/service/core/ai/defaultModel/resolve';
-import { isTeamModel } from '@fastgpt/global/core/ai/model';
+import { resolveEffectiveDefaultModelIds } from '@fastgpt/service/core/ai/model/default/resolve';
+import { isTeamModel } from '@fastgpt/global/core/ai/model/utils';
 
 /** 返回当前成员完整模型目录；命中内容版本时只返回 version。 */
 export async function handler(
@@ -25,13 +25,13 @@ export async function handler(
   }).query;
 
   const catalogIdentity = await authModelViewer({ req, outLinkAuthData });
-  const modelHandle = await getModelHandle({ teamId: catalogIdentity.teamId });
+  const modelHandle = await getTeamModelHandle({ teamId: catalogIdentity.teamId });
   const activeModels = modelHandle.getActiveModels();
   const configuredDefaults = modelHandle.configuredDefaultModelIds;
   const providers = getModelProviderMetadata().providers;
   const permission = await getMemberModelCatalogPermission({
     ...catalogIdentity,
-    catalogSnapshot: { models: activeModels, revision: modelHandle.revision }
+    catalogSnapshot: { models: activeModels, version: modelHandle.version }
   });
   const version = `3:${modelHandle.version}:${permission.version}`;
 

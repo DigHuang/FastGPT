@@ -3,10 +3,10 @@ import type {
   SystemModelDocumentDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import { resolveChannelType } from '@fastgpt/global/core/ai/model';
+import { resolveChannelType } from '@fastgpt/global/core/ai/model/utils';
 import { postCreateModel, putUpdateModel } from '@/web/core/ai/model/api';
 import { UpdateModelBodySchema } from '@fastgpt/global/openapi/core/ai/model/api';
-import type { ChannelType } from '@fastgpt/global/openapi/core/ai/model/channel/api';
+import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { normalizeModelPricingForSave } from '@fastgpt/global/core/ai/model/pricing';
 
 /** 保留完整未保存草稿，仅规范测试接口要求的模型标识和回退别名。 */

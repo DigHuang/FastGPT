@@ -77,6 +77,7 @@ describe('testModelConnection request timeout', () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.getAIApi.mockReturnValue({
+      requestMeta: { baseUrl: 'https://provider.example/v1' },
       ai: { audio: { speech: { create: mocks.createSpeech } } }
     });
   });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/defaultModel/schema';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
 import { createFakeChangeStream, type FakeChangeStream } from '@test/utils/changeStream';
 
 const mocks = vi.hoisted(() => {

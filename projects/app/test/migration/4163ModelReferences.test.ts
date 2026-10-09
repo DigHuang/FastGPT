@@ -4,7 +4,7 @@ import type {
   SystemMigrationProgressInput
 } from '@fastgpt/global/migration/schema';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/defaultModel/schema';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
 import { MongoDataset } from '@fastgpt/service/core/dataset/schema';
 import { MongoApp } from '@fastgpt/service/core/app/schema';
 import { MongoAppTemplate } from '@fastgpt/service/core/app/templates/templateSchema';

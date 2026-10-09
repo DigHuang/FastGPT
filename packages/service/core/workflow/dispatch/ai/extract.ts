@@ -1,4 +1,4 @@
-import { getModelHandle } from '../../../ai/model';
+import { getTeamModelHandle } from '../../../ai/model/index';
 import { chats2GPTMessages } from '@fastgpt/global/core/chat/adapt';
 import type { ChatItemMiniType } from '@fastgpt/global/core/chat/type';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
@@ -48,7 +48,6 @@ type ActionProps = Props & {
 export async function dispatchContentExtract(props: Props): Promise<Response> {
   const {
     runningAppInfo,
-    runningUserInfo,
     node: { nodeId, name },
     histories,
     params: { content, history = 6, modelId, model, description, extractKeys }
@@ -57,7 +56,7 @@ export async function dispatchContentExtract(props: Props): Promise<Response> {
   if (!content) {
     return getNodeErrResponse({ error: 'Input is empty' });
   }
-  const modelHandle = await getModelHandle({ teamId: runningUserInfo?.teamId });
+  const modelHandle = await getTeamModelHandle({ teamId: runningAppInfo.teamId });
   const extractModel = modelHandle.getLLMModelData({ modelId, model });
   const chatHistories = getHistories(history, histories);
 

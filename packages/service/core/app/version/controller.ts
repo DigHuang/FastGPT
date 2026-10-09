@@ -14,7 +14,7 @@ import type { AppVersionSchemaType } from '@fastgpt/global/core/app/version/type
 import { AppErrEnum } from '@fastgpt/global/common/error/code/app';
 import { isInteractiveNodeType } from '@fastgpt/global/core/workflow/node/constant';
 import { MongoTransactionConflictError } from '../../../common/mongo/sessionRun';
-import { getModelHandle } from '../../ai/model';
+import { getTeamModelHandle } from '../../ai/model/index';
 import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
 
 type VersionResourceSource = Pick<AppVersionSchemaType, 'nodes' | 'chatConfig' | 'resources'> & {
@@ -43,8 +43,19 @@ const getVersionResourceSnapshot = (
   });
 
 /** 有效快照无需重新解析模型；仅历史或损坏快照通过公开目录读取入口补齐 modelId。 */
-const getFallbackResourceModels = async (resources: unknown) =>
-  AppResourcesSchema.safeParse(resources).success ? [] : (await getModelHandle()).getAllModels();
+const getFallbackResourceModels = async ({
+  resources,
+  appId,
+  app
+}: {
+  resources: unknown;
+  appId: string;
+  app?: Pick<AppSchemaType, 'teamId'> | null;
+}) => {
+  if (AppResourcesSchema.safeParse(resources).success) return [];
+  const owner = app ?? (await MongoApp.findById(appId, 'teamId').lean());
+  return owner ? (await getTeamModelHandle({ teamId: String(owner.teamId) })).getAllModels() : [];
+};
 
 const normalizeStoredVersionWorkflow = (
   version: Pick<AppVersionSchemaType, 'nodes' | 'edges' | 'chatConfig'>
@@ -164,10 +175,15 @@ export const getAppLatestVersion = async (appId: string, app?: AppVersionLookupA
       .lean());
 
   if (version)
-    return normalizeAppVersionWorkflow(version, await getFallbackResourceModels(version.resources));
+    return normalizeAppVersionWorkflow(
+      version,
+      await getFallbackResourceModels({ resources: version.resources, appId, app })
+    );
   return normalizeLegacyAppWorkflow(
     migrationApp,
-    migrationApp ? (await getModelHandle()).getAllModels() : []
+    migrationApp
+      ? (await getTeamModelHandle({ teamId: String(migrationApp.teamId) })).getAllModels()
+      : []
   );
 };
 
@@ -178,11 +194,16 @@ export const getAppLatestVersion = async (appId: string, app?: AppVersionLookupA
 export const getAppDraftWorkflow = async (appId: string, app?: AppVersionLookupApp) => {
   const draft = await getAppDraftVersion(appId);
   if (draft)
-    return normalizeAppVersionWorkflow(draft, await getFallbackResourceModels(draft.resources));
+    return normalizeAppVersionWorkflow(
+      draft,
+      await getFallbackResourceModels({ resources: draft.resources, appId, app })
+    );
   const migrationApp = await loadApp(appId, app);
   return normalizeLegacyAppWorkflow(
     migrationApp,
-    migrationApp ? (await getModelHandle()).getAllModels() : []
+    migrationApp
+      ? (await getTeamModelHandle({ teamId: String(migrationApp.teamId) })).getAllModels()
+      : []
   );
 };
 
@@ -223,7 +244,7 @@ export const getAppDraftResourceBaseline = async (
     nodes: decodeToolSetNodesFromStorage(draft.nodes),
     chatConfig: draft.chatConfig,
     resourceRefs: (draft as { resourceRefs?: unknown }).resourceRefs,
-    models: (await getModelHandle()).getAllModels()
+    models: await getFallbackResourceModels({ resources: draft.resources, appId })
   });
 
   if (filter) {
@@ -455,7 +476,7 @@ export const getAppVersionById = async ({
     if (version)
       return normalizeAppVersionWorkflow(
         version,
-        await getFallbackResourceModels(version.resources)
+        await getFallbackResourceModels({ resources: version.resources, appId, app })
       );
   }
 

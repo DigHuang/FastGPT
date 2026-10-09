@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChannelStatusEnum } from '@fastgpt/global/core/ai/channel';
+import { ChannelStatusEnum } from '@fastgpt/global/core/ai/model/channel';
 
 const mocks = vi.hoisted(() => ({
   PUT: vi.fn()

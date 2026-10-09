@@ -20,7 +20,7 @@ import { ObjectIdSchema } from '../../../../common/type/mongo';
 import { I18nStringSchema } from '../../../../common/i18n/type';
 import { ModelDefaultIdsSchema } from '../../../../core/ai/model/default';
 import { OutLinkChatAuthSchema } from '../../../../support/permission/chat';
-import { AIScopeSchema } from '../scope';
+import { ChannelTypeSchema } from '../../../../core/ai/model/scope';
 
 export const ModelChannelSummarySchema = z.object({
   id: IntSchema.positive().meta({ example: 1, description: 'AI Proxy 渠道 ID' }),
@@ -203,38 +203,16 @@ export const GetSystemModelsResponseSchema = z.object({
 });
 export type GetSystemModelsResponse = z.infer<typeof GetSystemModelsResponseSchema>;
 
-/* ============================================================================
- * API: 获取团队私有模型列表（用户侧模型配置）
- * Route: GET /api/core/ai/model/teamModels
- * Method: GET
- * Description: 获取当前登录团队成员名下的私有模型列表及关联的团队渠道摘要
- * Tags: ['模型管理', 'Read']
- * ============================================================================ */
-
-export const TeamModelListItemSchema = z
-  .object({
-    modelId: z.string().meta({ description: '模型稳定 ID' }),
-    model: z.string().meta({ description: 'Provider 请求使用的模型标识' }),
-    name: z.string().meta({ description: '模型展示名称' }),
-    provider: z.string().meta({ description: '模型提供商标识' }),
-    scope: z.nativeEnum(ModelScopeEnum).default(ModelScopeEnum.team),
-    type: z.nativeEnum(ModelTypeEnum),
-    tmbId: z.string().optional(),
-    avatar: z.string().optional(),
-    isActive: z.boolean().optional(),
-    testMode: z.boolean().optional(),
-    charsPointsPrice: z.number().optional(),
-    priceTiers: z.array(ModelPriceTierSchema).optional(),
-    inputPrice: z.number().optional(),
-    outputPrice: z.number().optional(),
-    config: z.record(z.string(), z.any()).optional(),
+/* GET /api/core/ai/model/config?channelType=team */
+export const ModelConfigListItemSchema = SystemModelDataSchema.and(
+  z.object({
     channels: z.array(ModelChannelSummarySchema).meta({ description: '当前模型关联的渠道摘要' })
   })
-  .passthrough();
-export type TeamModelListItem = z.infer<typeof TeamModelListItemSchema>;
+);
+export type ModelConfigListItem = z.infer<typeof ModelConfigListItemSchema>;
 
 export const GetTeamModelsResponseSchema = z.object({
-  models: z.array(TeamModelListItemSchema),
+  models: z.array(ModelConfigListItemSchema),
   channels: z.array(ModelChannelSummarySchema),
   providers: z.array(ModelProviderSchema)
 });
@@ -249,10 +227,9 @@ export const ModelIdSchema = ObjectIdSchema.meta({
   description: '模型稳定 ObjectId'
 });
 
-export const ModelChannelTypeSchema = AIScopeSchema.meta({
+const ModelChannelTypeSchema = ChannelTypeSchema.meta({
   description: '模型作用域类型'
 });
-export type ModelChannelType = z.infer<typeof ModelChannelTypeSchema>;
 
 export const ModelReferenceSchema = z.object({
   modelId: ModelIdSchema,
@@ -378,7 +355,7 @@ export type GetModelTemplatesResponse = z.infer<typeof GetModelTemplatesResponse
 export const UpdateModelChannelsBodySchema = z
   .object({
     modelId: ModelIdSchema,
-    channelType: AIScopeSchema.meta({
+    channelType: ChannelTypeSchema.meta({
       description: '模型作用域；必填，服务端据此先鉴权再查询模型，避免无权限成员探测模型是否存在'
     }),
     addChannelIds: z.array(IntSchema.positive()).max(500).optional().meta({
@@ -500,21 +477,14 @@ export type UpdateModelStatusBody = z.infer<typeof UpdateModelStatusBodySchema>;
 
 /* ============================================================================
  * API: 获取系统模型管理配置
- * Route: GET /api/core/ai/model/list?channelType=system
+ * Route: GET /api/core/ai/model/config?channelType=system
  * Method: GET
  * Description: 获取系统模型、渠道、Provider 与默认模型配置
  * Tags: ['Model', 'Admin', 'Read']
  * ============================================================================ */
 
-export const SystemModelListItemSchema = SystemModelDataSchema.and(
-  z.object({
-    channels: z.array(ModelChannelSummarySchema).meta({ description: '当前模型关联的渠道摘要' })
-  })
-);
-export type SystemModelListItem = z.infer<typeof SystemModelListItemSchema>;
-
 export const GetSystemModelConfigResponseSchema = z.object({
-  models: z.array(SystemModelListItemSchema),
+  models: z.array(ModelConfigListItemSchema),
   channels: z.array(ModelChannelSummarySchema).meta({
     description: '全部渠道摘要，供新增、编辑和关联渠道交互复用'
   }),
@@ -533,7 +503,7 @@ export type GetSystemModelConfigResponse = z.infer<typeof GetSystemModelConfigRe
 
 /* GET /api/core/ai/model/config */
 export const GetModelConfigQuerySchema = z.object({
-  channelType: AIScopeSchema.meta({
+  channelType: ChannelTypeSchema.meta({
     example: 'system',
     description: 'system=系统模型管理配置；team=当前成员私有模型配置'
   })
@@ -570,7 +540,6 @@ export const ImportedSystemModelSchema = z.discriminatedUnion('type', [
 ]);
 export type ImportedSystemModel = z.infer<typeof ImportedSystemModelSchema>;
 
-const ImportedSystemModelRecordListSchema = z.array(z.record(z.string(), z.unknown()));
 const JsonSystemModelListSchema = z.string().transform((value, ctx) => {
   try {
     return JSON.parse(value) as unknown;
@@ -582,10 +551,10 @@ const JsonSystemModelListSchema = z.string().transform((value, ctx) => {
 
 /* PUT /api/core/ai/model/updateWithJson */
 export const UpdateSystemModelsWithJsonBodySchema = z.object({
-  config: JsonSystemModelListSchema.pipe(ImportedSystemModelRecordListSchema).meta({
+  config: JsonSystemModelListSchema.pipe(z.array(ImportedSystemModelSchema)).meta({
     example:
       '[{"modelId":"68ad85a7463006c963799a05","scope":"system","type":"llm","provider":"OpenAI","model":"gpt-5","name":"GPT-5","isActive":true,"config":{"maxContext":400000,"maxResponse":128000,"quoteMaxToken":300000,"toolChoice":true}}]',
-    description: '最新系统模型配置 JSON；无 modelId 的旧记录会被忽略'
+    description: '完整系统模型配置 JSON，每条记录必须包含源实例模型 ID'
   })
 });
 export type UpdateSystemModelsWithJsonBody = z.input<typeof UpdateSystemModelsWithJsonBodySchema>;

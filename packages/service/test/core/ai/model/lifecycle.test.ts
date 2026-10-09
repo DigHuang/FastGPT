@@ -1,196 +1,143 @@
-import { ModelTypeEnum, ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
+import { Types } from '@fastgpt/service/common/mongo';
+import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
+import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
+import {
+  PerResourceTypeEnum,
+  ReadPermissionVal
+} from '@fastgpt/global/support/permission/constant';
+import { publishSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 
-const mocks = vi.hoisted(() => ({
-  createModel: vi.fn(),
-  updateModel: vi.fn(),
-  deleteModels: vi.fn(),
-  appendModelToChannels: vi.fn(),
-  syncModelNameInChannels: vi.fn(),
-  removeModelsFromChannels: vi.fn(),
-  loggerError: vi.fn()
+const proxy = vi.hoisted(() => ({ append: vi.fn(), rename: vi.fn(), remove: vi.fn() }));
+// 只替换渠道 I/O 边界，模型、版本、ACL 和补偿更新均执行真实数据库实现。
+vi.mock('@fastgpt/service/core/ai/model/channel/binding', () => ({
+  appendModelToChannels: proxy.append,
+  syncModelNameInChannels: proxy.rename,
+  removeModelsFromChannels: proxy.remove
 }));
-
-vi.mock('../../../../core/ai/model/mutation', () => ({
-  createModel: mocks.createModel,
-  updateModel: mocks.updateModel,
-  deleteModels: mocks.deleteModels
-}));
-
-vi.mock('../../../../core/ai/channel/service', () => ({
-  appendModelToChannels: mocks.appendModelToChannels,
-  syncModelNameInChannels: mocks.syncModelNameInChannels,
-  removeModelsFromChannels: mocks.removeModelsFromChannels
-}));
-
-vi.mock('../../../../common/logger', () => ({
-  LogCategories: { MODULE: { AI: { MODEL: 'ai_model' } } },
-  getLogger: vi.fn(() => ({
-    error: mocks.loggerError,
-    warn: vi.fn(),
-    info: vi.fn(),
-    debug: vi.fn()
-  }))
-}));
-
 import {
   createModelWithLifecycle,
   updateModelWithLifecycle,
-  deleteModelsWithLifecycle
-} from '../../../../core/ai/model/lifecycle';
+  deleteModelsWithLifecycle,
+  importSystemModelsWithLifecycle
+} from '@fastgpt/service/core/ai/model/lifecycle';
 
-describe('model lifecycle domain service', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+beforeAll(async () => {
+  const actual = await vi.importActual<typeof import('@fastgpt/service/common/mongo/sessionRun')>(
+    '@fastgpt/service/common/mongo/sessionRun'
+  );
+  vi.mocked(mongoSessionRun).mockImplementation(actual.mongoSessionRun);
+});
+const owner = { channelType: 'system' as const };
+const draft = {
+  scope: ModelScopeEnum.system as const,
+  type: ModelTypeEnum.llm as const,
+  provider: 'OpenAI',
+  model: 'original',
+  name: 'Original',
+  isActive: true,
+  config: { maxContext: 16000, maxResponse: 8000, quoteMaxToken: 12000 }
+};
 
-  describe('createModelWithLifecycle', () => {
-    const dummyModelData = {
-      model: 'gpt-test',
-      name: 'GPT Test',
-      provider: 'OpenAI',
-      type: ModelTypeEnum.llm,
-      scope: ModelScopeEnum.team,
-      config: { maxContext: 16000, maxResponse: 8000 }
-    } as any;
+beforeEach(async () => {
+  await Promise.all([
+    MongoAIModel.deleteMany({}),
+    MongoAIDefaultModel.deleteMany({}),
+    MongoResourcePermission.deleteMany({})
+  ]);
+  publishSystemModelHandle(undefined);
+  proxy.append.mockReset().mockResolvedValue(undefined);
+  proxy.rename.mockReset().mockResolvedValue(undefined);
+  proxy.remove.mockReset().mockResolvedValue(undefined);
+});
 
-    it('creates model and appends to channels when channelIds are provided', async () => {
-      mocks.createModel.mockResolvedValue({ modelId: 'mock-model-id-123' });
-      mocks.appendModelToChannels.mockResolvedValue(undefined);
-
-      const result = await createModelWithLifecycle({
-        modelData: dummyModelData,
-        channelType: 'team',
-        channelIds: [1, 2],
-        tmbId: 'mock-tmb-id',
-        teamId: 'mock-team-id'
-      });
-
-      expect(mocks.createModel).toHaveBeenCalledWith({
-        modelData: dummyModelData,
-        channelType: 'team',
-        tmbId: 'mock-tmb-id',
-        teamId: 'mock-team-id'
-      });
-
-      expect(mocks.appendModelToChannels).toHaveBeenCalledWith({
-        channelIds: [1, 2],
-        model: 'gpt-test',
-        channelType: 'team',
-        tmbId: 'mock-tmb-id'
-      });
-
-      expect(result).toEqual({ modelId: 'mock-model-id-123' });
+describe('model lifecycle', () => {
+  it('preserves stable identity and synchronizes an edited upstream identifier', async () => {
+    const model = await createModelWithLifecycle({ ...owner, modelData: draft, channelIds: [1] });
+    await updateModelWithLifecycle({
+      ...owner,
+      modelId: model.modelId,
+      modelData: { ...draft, model: 'renamed' }
     });
-
-    it('creates model and skips appendModelToChannels when channelIds are empty or omitted', async () => {
-      mocks.createModel.mockResolvedValue({ modelId: 'mock-model-id-456' });
-
-      const result = await createModelWithLifecycle({
-        modelData: dummyModelData,
-        channelType: 'system',
-        channelIds: []
-      });
-
-      expect(mocks.createModel).toHaveBeenCalledWith({
-        modelData: dummyModelData,
-        channelType: 'system',
-        tmbId: undefined,
-        teamId: undefined
-      });
-
-      expect(mocks.appendModelToChannels).not.toHaveBeenCalled();
-      expect(result).toEqual({ modelId: 'mock-model-id-456' });
-    });
+    expect((await MongoAIModel.findById(model.modelId).lean())?.model).toBe('renamed');
+    expect(proxy.rename).toHaveBeenCalledWith(
+      expect.objectContaining({ oldModel: 'original', newModel: 'renamed', channelType: 'system' })
+    );
   });
-
-  describe('updateModelWithLifecycle', () => {
-    it('delegates to updateModel injecting syncModelNameInChannels', async () => {
-      mocks.updateModel.mockResolvedValue(undefined);
-
-      await updateModelWithLifecycle({
-        modelId: 'mock-model-id',
-        channelType: 'team',
-        tmbId: 'mock-tmb-id',
-        modelData: {
-          type: ModelTypeEnum.llm,
-          name: 'Renamed Model',
-          model: 'gpt-new'
-        } as any
-      });
-
-      expect(mocks.updateModel).toHaveBeenCalledWith({
-        modelId: 'mock-model-id',
-        channelType: 'team',
-        tmbId: 'mock-tmb-id',
-        modelData: {
-          type: ModelTypeEnum.llm,
-          name: 'Renamed Model',
-          model: 'gpt-new'
-        },
-        syncModelName: mocks.syncModelNameInChannels
-      });
+  it('compensates the Mongo identifier after failed channel synchronization', async () => {
+    const model = await createModelWithLifecycle({ ...owner, modelData: draft });
+    proxy.rename.mockRejectedValueOnce(new Error('proxy unavailable'));
+    await expect(
+      updateModelWithLifecycle({
+        ...owner,
+        modelId: model.modelId,
+        modelData: { ...draft, model: 'renamed' }
+      })
+    ).rejects.toThrow('proxy unavailable');
+    expect((await MongoAIModel.findById(model.modelId).lean())?.model).toBe('original');
+  });
+  it('imports stable IDs through the same rename and deletion cleanup used by ordinary CRUD', async () => {
+    const retained = await createModelWithLifecycle({ ...owner, modelData: draft });
+    const removed = await createModelWithLifecycle({
+      ...owner,
+      modelData: { ...draft, model: 'removed' }
+    });
+    await MongoResourcePermission.create({
+      resourceType: PerResourceTypeEnum.model,
+      resourceId: removed.modelId,
+      teamId: new Types.ObjectId(),
+      tmbId: new Types.ObjectId(),
+      permission: ReadPermissionVal
+    });
+    await importSystemModelsWithLifecycle({
+      config: [{ ...draft, modelId: retained.modelId, model: 'imported-name' }]
+    });
+    expect(await MongoAIModel.countDocuments({})).toBe(1);
+    expect((await MongoAIModel.findById(retained.modelId).lean())?.model).toBe('imported-name');
+    expect(await MongoResourcePermission.countDocuments({ resourceId: removed.modelId })).toBe(0);
+    expect(proxy.rename).toHaveBeenCalledWith(
+      expect.objectContaining({ oldModel: 'original', newModel: 'imported-name' })
+    );
+    expect(proxy.remove).toHaveBeenCalledWith({
+      models: ['removed'],
+      channelType: 'system',
+      tmbId: ''
     });
   });
-
-  describe('deleteModelsWithLifecycle', () => {
-    it('deletes models and cleans up channel mappings', async () => {
-      mocks.deleteModels.mockResolvedValue(['gpt-1', 'gpt-2']);
-      mocks.removeModelsFromChannels.mockResolvedValue(undefined);
-
-      const deleted = await deleteModelsWithLifecycle({
-        modelIds: ['id-1', 'id-2'],
-        channelType: 'team',
-        tmbId: 'mock-tmb-id'
-      });
-
-      expect(mocks.deleteModels).toHaveBeenCalledWith({
-        modelIds: ['id-1', 'id-2'],
-        channelType: 'team',
-        tmbId: 'mock-tmb-id'
-      });
-
-      expect(mocks.removeModelsFromChannels).toHaveBeenCalledWith({
-        models: ['gpt-1', 'gpt-2'],
-        channelType: 'team',
-        tmbId: 'mock-tmb-id'
-      });
-
-      expect(deleted).toEqual(['gpt-1', 'gpt-2']);
-      expect(mocks.loggerError).not.toHaveBeenCalled();
+  it('compensates failed import renames, continues later renames and cleans deleted mappings', async () => {
+    const first = await createModelWithLifecycle({ ...owner, modelData: draft });
+    const second = await createModelWithLifecycle({
+      ...owner,
+      modelData: { ...draft, model: 'second' }
     });
-
-    it('gracefully tolerates channel mapping cleanup failure without throwing', async () => {
-      mocks.deleteModels.mockResolvedValue(['gpt-1']);
-      const error = new Error('AIProxy network error');
-      mocks.removeModelsFromChannels.mockRejectedValue(error);
-
-      const deleted = await deleteModelsWithLifecycle({
-        modelIds: ['id-1'],
-        channelType: 'system'
-      });
-
-      expect(mocks.deleteModels).toHaveBeenCalledWith({
-        modelIds: ['id-1'],
-        channelType: 'system',
-        tmbId: undefined
-      });
-
-      expect(mocks.removeModelsFromChannels).toHaveBeenCalledWith({
-        models: ['gpt-1'],
-        channelType: 'system',
-        tmbId: ''
-      });
-
-      expect(deleted).toEqual(['gpt-1']);
-      expect(mocks.loggerError).toHaveBeenCalledWith(
-        'Clean up channel mappings after model deletion failed',
-        expect.objectContaining({
-          channelType: 'system',
-          models: ['gpt-1'],
-          error
-        })
-      );
+    await createModelWithLifecycle({ ...owner, modelData: { ...draft, model: 'removed' } });
+    proxy.rename.mockRejectedValueOnce(new Error('first rename failed'));
+    await expect(
+      importSystemModelsWithLifecycle({
+        config: [
+          { ...draft, modelId: first.modelId, model: 'first-renamed' },
+          { ...draft, modelId: second.modelId, model: 'second-renamed' }
+        ]
+      })
+    ).rejects.toThrow('first rename failed');
+    expect((await MongoAIModel.findById(first.modelId).lean())?.model).toBe('original');
+    expect((await MongoAIModel.findById(second.modelId).lean())?.model).toBe('second-renamed');
+    expect(proxy.rename).toHaveBeenCalledTimes(2);
+    expect(proxy.remove).toHaveBeenCalledWith({
+      models: ['removed'],
+      channelType: 'system',
+      tmbId: ''
     });
+  });
+  it('keeps a committed deletion successful when channel cleanup fails', async () => {
+    const model = await createModelWithLifecycle({ ...owner, modelData: draft });
+    proxy.remove.mockRejectedValueOnce(new Error('proxy unavailable'));
+    expect(await deleteModelsWithLifecycle({ ...owner, modelIds: [model.modelId] })).toEqual([
+      'original'
+    ]);
+    expect(await MongoAIModel.countDocuments({})).toBe(0);
   });
 });

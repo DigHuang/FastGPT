@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
-import { resolveEffectiveDefaultModelIds } from '../../../../core/ai/defaultModel/resolve';
+import { resolveEffectiveDefaultModelIds } from '../../../../../core/ai/model/default/resolve';
 
 const llm = (modelId: string, vision = false): SystemModelDataType => ({
   modelId,
@@ -75,6 +75,36 @@ describe('resolveEffectiveDefaultModelIds', () => {
 
     expect(result.datasetImageLLM).toBeUndefined();
     expect(result.chatTitleLLM).toBeUndefined();
+  });
+
+  it('falls back dataset text to the effective LLM rather than the first candidate', () => {
+    for (const datasetTextLLM of [undefined, 'missing', 'embedding']) {
+      expect(
+        resolveEffectiveDefaultModelIds({
+          models: [llm('first'), llm('configured'), embedding('embedding')],
+          configuredDefaults: { llm: 'configured', datasetTextLLM }
+        }).datasetTextLLM
+      ).toBe('configured');
+    }
+  });
+
+  it('excludes inactive models from configured and fallback defaults', () => {
+    expect(
+      resolveEffectiveDefaultModelIds({
+        models: [{ ...llm('inactive', true), isActive: false }, llm('active')],
+        configuredDefaults: {
+          llm: 'inactive',
+          datasetTextLLM: 'inactive',
+          datasetImageLLM: 'inactive',
+          chatTitleLLM: 'inactive'
+        }
+      })
+    ).toMatchObject({
+      llm: 'active',
+      datasetTextLLM: 'active',
+      datasetImageLLM: undefined,
+      chatTitleLLM: undefined
+    });
   });
 
   it('returns undefined when no same-type fallback exists', () => {

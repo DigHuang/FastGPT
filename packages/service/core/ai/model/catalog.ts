@@ -1,9 +1,5 @@
 import type { SystemDefaultModelType } from '../type';
-import {
-  getModelProviderMetadata,
-  getModelProvider,
-  preloadModelProviders
-} from './provider/controller';
+import { getModelProviderMetadata, preloadModelProviders } from './provider/controller';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import {
   type EmbeddingSystemModelDataType,
@@ -11,41 +7,22 @@ import {
   type RerankSystemModelDataType,
   type STTSystemModelDataType,
   type TTSSystemModelDataType,
-  SystemModelDataSchema,
-  SystemModelDocumentDataSchema,
   type SystemModelDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import { getLogger, LogCategories } from '../../../common/logger';
-import { getRuntimeResolvedPriceTiers } from '@fastgpt/global/core/ai/model/pricing';
-import { clearAllMyModelsCache } from '../../../support/permission/model/cache';
 import { hashStr } from '@fastgpt/global/common/string/tools';
-import { readSystemModelSnapshot, readSystemModelRevision } from './entity';
+import { readModelCatalogSnapshot, readModelCatalogRevision } from './entity';
 import { withTimeout } from '@fastgpt/global/common/system/utils';
-import { createModelHandle, getCachedModelHandle, publishModelHandle } from './handle';
+import { createModelHandle } from './handle';
+import { getCachedSystemModelHandle, publishSystemModelHandle } from './cache';
 import { desensitizeSystemModel } from './transform';
+import { formatDbModelToRuntimeModel } from './runtime';
+import { resolveEffectiveDefaultModelIds } from './default/resolve';
 
 /**
  * 只读取数据库安装实例并原子发布运行时模型快照，不执行插件请求、历史迁移或自动预装。
  */
-const publishInstalledModels = async ({
-  language = 'en',
-  skipPermissionCacheInvalidation = false
-}: {
-  language?: string;
-  /** 启动阶段只发布初始快照，避免重启时删除仍然有效的成员目录缓存。 */
-  skipPermissionCacheInvalidation?: boolean;
-} = {}) => {
-  const getPermissionCacheSignature = (models: SystemModelDataType[]) =>
-    models
-      .filter((model) => model.scope === ModelScopeEnum.system || !model.scope)
-      .map((model) => `${model.modelId}:${model.model}`)
-      .sort()
-      .join('\n');
-  const previousHandle = getCachedModelHandle();
-  const previousPermissionCacheSignature = previousHandle
-    ? getPermissionCacheSignature(previousHandle.getActiveModels())
-    : undefined;
-
+const publishInstalledModels = async ({ language = 'en' }: { language?: string } = {}) => {
   const _systemModelList: SystemModelDataType[] = [];
   const _systemModelMap = new Map<string, SystemModelDataType>();
   const _systemDefaultModel: SystemDefaultModelType = {};
@@ -54,11 +31,6 @@ const publishInstalledModels = async ({
     _systemModelList.push(modelData);
     _systemModelMap.set(`id:${modelData.modelId}`, modelData);
     _systemModelMap.set(`model:${modelData.model}`, modelData);
-
-    // 管理列表包含停用模型，统一解析价格可避免旧字段或单档双零在列表中显示错误。
-    if (modelData.type === ModelTypeEnum.llm) {
-      modelData.priceTiers = getRuntimeResolvedPriceTiers(modelData);
-    }
   };
 
   try {
@@ -66,113 +38,59 @@ const publishInstalledModels = async ({
       models: dbModels,
       defaultModelIds: configuredDefaultModelIds,
       revision
-    } = await readSystemModelSnapshot();
-    const dbDocuments = dbModels.map((dbModel) => SystemModelDocumentDataSchema.parse(dbModel));
-
-    dbModels.forEach((dbModel, index) => {
-      const dbDocument = dbDocuments[index];
-
-      const provider = getModelProvider(dbDocument.provider, language);
-      const runtimeModel = SystemModelDataSchema.parse({
-        ...dbDocument,
-        modelId: String(dbModel._id),
-        provider: provider.id,
-        avatar: provider.avatar
-      });
-
-      pushModel(runtimeModel);
+    } = await readModelCatalogSnapshot({ scope: ModelScopeEnum.system });
+    dbModels.forEach((dbModel) => {
+      pushModel(formatDbModelToRuntimeModel(dbModel, { language, fallbackProvider: false }));
     });
 
-    // 默认配置只保存稳定 ID。无效配置留给成员目录按类型回退，不再读取模型布尔字段修复。
-    const configuredModel = <T extends SystemModelDataType>(
-      modelId: string | undefined,
-      predicate: (model: SystemModelDataType) => model is T
-    ) => {
-      const model = modelId ? _systemModelMap.get(`id:${modelId}`) : undefined;
-      return model?.isActive && predicate(model) ? model : undefined;
-    };
-    _systemDefaultModel.llm = configuredModel<LLMSystemModelDataType>(
-      configuredDefaultModelIds.llm,
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
-    );
-    _systemDefaultModel.datasetTextLLM = configuredModel<LLMSystemModelDataType>(
-      configuredDefaultModelIds.datasetTextLLM,
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
-    );
-    _systemDefaultModel.datasetImageLLM = configuredModel<LLMSystemModelDataType>(
-      configuredDefaultModelIds.datasetImageLLM,
-      (model): model is LLMSystemModelDataType =>
-        model.type === ModelTypeEnum.llm && !!model.config.vision
-    );
-    _systemDefaultModel.chatTitleLLM = configuredModel<LLMSystemModelDataType>(
-      configuredDefaultModelIds.chatTitleLLM,
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
-    );
-    _systemDefaultModel.embedding = configuredModel<EmbeddingSystemModelDataType>(
-      configuredDefaultModelIds.embedding,
-      (model): model is EmbeddingSystemModelDataType => model.type === ModelTypeEnum.embedding
-    );
-    _systemDefaultModel.tts = configuredModel<TTSSystemModelDataType>(
-      configuredDefaultModelIds.tts,
-      (model): model is TTSSystemModelDataType => model.type === ModelTypeEnum.tts
-    );
-    _systemDefaultModel.stt = configuredModel<STTSystemModelDataType>(
-      configuredDefaultModelIds.stt,
-      (model): model is STTSystemModelDataType => model.type === ModelTypeEnum.stt
-    );
-    _systemDefaultModel.rerank = configuredModel<RerankSystemModelDataType>(
-      configuredDefaultModelIds.rerank,
-      (model): model is RerankSystemModelDataType => model.type === ModelTypeEnum.rerank
-    );
-
-    // Active 列表沿用 MongoDB 的新建时间倒序；系统级默认模型和公共目录版本只计算系统模型。
     const _systemActiveModelList = _systemModelList.filter(
       (model) => model.isActive && (model.scope === ModelScopeEnum.system || !model.scope)
     );
-
-    // Default model check
-    {
-      if (!_systemDefaultModel.llm) {
-        _systemDefaultModel.llm = _systemActiveModelList.find(
-          (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
-        );
-      }
-      if (!_systemDefaultModel.datasetTextLLM) {
-        _systemDefaultModel.datasetTextLLM = _systemDefaultModel.llm;
-      }
-      if (!_systemDefaultModel.embedding) {
-        _systemDefaultModel.embedding = _systemActiveModelList.find(
-          (model): model is EmbeddingSystemModelDataType => model.type === ModelTypeEnum.embedding
-        );
-      }
-      if (!_systemDefaultModel.tts) {
-        _systemDefaultModel.tts = _systemActiveModelList.find(
-          (model): model is TTSSystemModelDataType => model.type === ModelTypeEnum.tts
-        );
-      }
-      if (!_systemDefaultModel.stt) {
-        _systemDefaultModel.stt = _systemActiveModelList.find(
-          (model): model is STTSystemModelDataType => model.type === ModelTypeEnum.stt
-        );
-      }
-      if (!_systemDefaultModel.rerank) {
-        _systemDefaultModel.rerank = _systemActiveModelList.find(
-          (model): model is RerankSystemModelDataType => model.type === ModelTypeEnum.rerank
-        );
-      }
-    }
-
-    const nextPermissionCacheSignature = getPermissionCacheSignature(
-      _systemModelList.filter((model) => model.isActive)
+    // 两类目录只在候选集合上不同，默认槽位和回退规则由同一解析器负责。
+    const effectiveDefaults = resolveEffectiveDefaultModelIds({
+      models: _systemActiveModelList,
+      configuredDefaults: configuredDefaultModelIds
+    });
+    const resolveModel = <T extends SystemModelDataType>(
+      slot: keyof typeof effectiveDefaults,
+      predicate: (model: SystemModelDataType) => model is T
+    ) => {
+      const id = effectiveDefaults[slot];
+      const model = id ? _systemModelMap.get('id:' + id) : undefined;
+      return model && predicate(model) ? model : undefined;
+    };
+    _systemDefaultModel.llm = resolveModel(
+      ModelTypeEnum.llm,
+      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
     );
-    if (
-      !skipPermissionCacheInvalidation &&
-      previousPermissionCacheSignature !== undefined &&
-      previousPermissionCacheSignature !== nextPermissionCacheSignature
-    ) {
-      // 只有已发布快照中的模型身份发生变化才失效缓存；首次启动没有可比较的旧快照。
-      await clearAllMyModelsCache();
-    }
+    _systemDefaultModel.datasetTextLLM = resolveModel(
+      'datasetTextLLM',
+      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+    );
+    _systemDefaultModel.datasetImageLLM = resolveModel(
+      'datasetImageLLM',
+      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+    );
+    _systemDefaultModel.chatTitleLLM = resolveModel(
+      'chatTitleLLM',
+      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+    );
+    _systemDefaultModel.embedding = resolveModel(
+      ModelTypeEnum.embedding,
+      (model): model is EmbeddingSystemModelDataType => model.type === ModelTypeEnum.embedding
+    );
+    _systemDefaultModel.tts = resolveModel(
+      ModelTypeEnum.tts,
+      (model): model is TTSSystemModelDataType => model.type === ModelTypeEnum.tts
+    );
+    _systemDefaultModel.stt = resolveModel(
+      ModelTypeEnum.stt,
+      (model): model is STTSystemModelDataType => model.type === ModelTypeEnum.stt
+    );
+    _systemDefaultModel.rerank = resolveModel(
+      ModelTypeEnum.rerank,
+      (model): model is RerankSystemModelDataType => model.type === ModelTypeEnum.rerank
+    );
 
     // 完整目录与内容版本一起发布，不暴露多次赋值的半成品。
     {
@@ -185,7 +103,7 @@ const publishInstalledModels = async ({
           defaultModelIds: configuredDefaultModelIds
         })
       );
-      publishModelHandle(
+      publishSystemModelHandle(
         createModelHandle({
           models: _systemModelList,
           defaultModels: _systemDefaultModel,
@@ -230,8 +148,11 @@ let modelRefresh: Promise<void> | undefined;
  */
 export const refreshModelHandle = async () => {
   const refresh = async () => {
-    const requiredRevision = await readSystemModelRevision();
-    while (!getCachedModelHandle() || getCachedModelHandle()!.revision < requiredRevision) {
+    const requiredRevision = await readModelCatalogRevision({ scope: ModelScopeEnum.system });
+    while (
+      !getCachedSystemModelHandle() ||
+      getCachedSystemModelHandle()!.revision < requiredRevision
+    ) {
       await loadInstalledModels();
     }
   };
@@ -242,7 +163,7 @@ export const refreshModelHandle = async () => {
     });
     await withTimeout(modelRefresh, 5000, 'Model catalog refresh timed out');
   } catch (error) {
-    const handle = getCachedModelHandle();
+    const handle = getCachedSystemModelHandle();
     if (!handle) throw error;
     getLogger(LogCategories.MODULE.AI.CONFIG).warn(
       'Using local model catalog after refresh failure',
@@ -259,14 +180,12 @@ export const refreshModelHandle = async () => {
  * 历史模型迁移由阻塞升级任务负责。
  */
 export const loadSystemModels = async (refresh = false, language = 'en') => {
-  if (!refresh && getCachedModelHandle()) return;
+  if (!refresh && getCachedSystemModelHandle()) return;
 
   try {
-    const isInitialLoad = !getCachedModelHandle();
     await preloadModelProviders();
     await loadInstalledModels({
-      language,
-      skipPermissionCacheInvalidation: isInitialLoad
+      language
     });
   } catch (error) {
     getLogger(LogCategories.MODULE.AI.CONFIG).error('System models orchestration failed', {

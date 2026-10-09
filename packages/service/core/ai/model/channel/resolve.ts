@@ -1,9 +1,9 @@
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
-import type { ChannelType } from '@fastgpt/global/openapi/core/ai/model/channel/api';
-import { aiProxyClient } from '../../../thirdProvider/aiproxy/client';
-import type { AiproxyChannel, AiproxyGroupChannel } from '../../../thirdProvider/aiproxy/type';
-import { getMemberGroupId } from '../../../thirdProvider/aiproxy/group';
-import { tolerateNotFound } from '../../../thirdProvider/aiproxy/error';
+import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
+import type { AiproxyChannel, AiproxyGroupChannel } from '../../../../thirdProvider/aiproxy/type';
+import { getMemberGroupId } from '../../../../thirdProvider/aiproxy/group';
+import { tolerateNotFound } from '../../../../thirdProvider/aiproxy/error';
+import { getAiproxyClientByScope } from './client';
 
 /**
  * 按渠道归属路由查找目标渠道（系统渠道或私有分组渠道）
@@ -28,14 +28,18 @@ export const resolveChannelForOperation = async ({
 }): Promise<ResolvedChannel> => {
   if (channelType === 'system') {
     // Handlers reject non-root callers with rootOnlyPermit before this point.
-    const channel = await tolerateNotFound(() => aiProxyClient.system.channels.get(id));
+    const channel = await tolerateNotFound(() =>
+      getAiproxyClientByScope({ channelType, tmbId }).channels.get(id)
+    );
     if (!channel) return Promise.reject(ModelErrEnum.channelNotExist);
     return { kind: 'system', channel };
   }
 
   // team scope 始终绑定当前会话成员，root 也不能借渠道 ID 跨成员操作。
   const groupId = getMemberGroupId(tmbId);
-  const channel = await tolerateNotFound(() => aiProxyClient.group(groupId).channels.get(id));
+  const channel = await tolerateNotFound(() =>
+    getAiproxyClientByScope({ channelType, tmbId }).channels.get(id)
+  );
   if (!channel) return Promise.reject(ModelErrEnum.channelNotExist);
   return { kind: 'group', channel, groupId };
 };
@@ -74,7 +78,9 @@ export const resolveChannelObservabilityScope = async ({
   if (channelType === 'system') {
     if (!isRoot) return Promise.reject(ModelErrEnum.rootOnlyPermit);
     if (channelId !== undefined) {
-      const channel = await tolerateNotFound(() => aiProxyClient.system.channels.get(channelId));
+      const channel = await tolerateNotFound(() =>
+        getAiproxyClientByScope({ channelType, tmbId }).channels.get(channelId)
+      );
       if (!channel) return Promise.reject(ModelErrEnum.channelNotExist);
     }
     return {};
@@ -83,7 +89,7 @@ export const resolveChannelObservabilityScope = async ({
   const groupId = getMemberGroupId(tmbId);
   if (channelId !== undefined) {
     const channel = await tolerateNotFound(() =>
-      aiProxyClient.group(groupId).channels.get(channelId)
+      getAiproxyClientByScope({ channelType, tmbId }).channels.get(channelId)
     );
     if (!channel) return Promise.reject(ModelErrEnum.channelNotExist);
   }

@@ -6,7 +6,7 @@ import {
   TeamModelCreatePermissionVal,
   TeamReadPermissionVal
 } from '@fastgpt/global/support/permission/user/constant';
-import { publishModelHandle } from '@fastgpt/service/core/ai/model/handle';
+import { publishSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 import { loadInstalledModels } from '@fastgpt/service/core/ai/model/catalog';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
 import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
@@ -167,7 +167,7 @@ describe('team model management integration: permission, member isolation and AI
     buckets = new Map();
     requests = [];
     external.listModels.mockReset().mockResolvedValue([]);
-    publishModelHandle(undefined);
+    publishSystemModelHandle(undefined);
     await loadInstalledModels();
   });
 
@@ -431,7 +431,9 @@ describe('team model management integration: permission, member isolation and AI
 
       for (const response of responses) {
         expect(response.code).toBe(500);
-        expect(response.error).toBe('modelUnExist');
+        expect(typeof response.error === 'string' ? response.error : response.error.message).toBe(
+          'modelUnExist'
+        );
       }
       expect(await MongoAIModel.countDocuments({ model: 'model-a' })).toBe(1);
     });
@@ -461,7 +463,9 @@ describe('team model management integration: permission, member isolation and AI
 
       for (const response of responses) {
         expect(response.code).toBe(500);
-        expect(response.error).toBe('modelUnExist');
+        expect(typeof response.error === 'string' ? response.error : response.error.message).toBe(
+          'modelUnExist'
+        );
       }
       expect(await MongoAIModel.countDocuments({ model: 'system-model' })).toBe(1);
     });

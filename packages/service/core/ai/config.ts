@@ -1,7 +1,7 @@
 import OpenAI from '@fastgpt/global/core/ai';
 import { type OpenaiAccountType } from '@fastgpt/global/support/user/team/type';
 import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
-import { isSystemModel } from '@fastgpt/global/core/ai/model';
+import { isSystemModel } from '@fastgpt/global/core/ai/model/utils';
 import { serviceEnv } from '../../env';
 import { getMemberGroupId } from '../../thirdProvider/aiproxy/group';
 import { getLegacyOpenAIRequestOptions, getLegacyAxiosRequestConfig } from './legacy/requestUrl';

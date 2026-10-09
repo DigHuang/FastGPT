@@ -1,4 +1,4 @@
-import { getModelHandle } from '@fastgpt/service/core/ai/model';
+import { getTeamModelHandle } from '@fastgpt/service/core/ai/model/index';
 import { getDatasetModelReference } from '@fastgpt/service/core/dataset/model';
 import { MongoDataset } from '@fastgpt/service/core/dataset/schema';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
@@ -111,7 +111,7 @@ async function handler(req: ApiRequestProps): Promise<GetDatasetListResponse> {
     return { updateTime: -1, _id: -1 };
   })();
   const myDatasets = await MongoDataset.find(findDatasetQuery).sort(datasetSort).lean();
-  const modelHandle = await getModelHandle({ teamId });
+  const modelHandle = await getTeamModelHandle({ teamId });
   const formatDatasets = myDatasets
     .map((dataset) => {
       const vectorModel = modelHandle.findModelData(

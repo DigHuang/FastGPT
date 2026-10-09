@@ -1,4 +1,4 @@
-import { getModelHandle } from '@fastgpt/service/core/ai/model';
+import { getTeamModelHandle } from '@fastgpt/service/core/ai/model/index';
 import { getDatasetModelReference } from '@fastgpt/service/core/dataset/model';
 
 import { pushLLMTrainingUsage } from '@fastgpt/service/support/wallet/usage/controller';
@@ -105,7 +105,7 @@ export async function generateQA(): Promise<any> {
         });
 
         try {
-          const modelHandle = await getModelHandle({ teamId: String(data.teamId) });
+          const modelHandle = await getTeamModelHandle({ teamId: String(data.teamId) });
           const modelData = modelHandle.getLLMModelData(
             getDatasetModelReference(data.dataset, 'agent')
           );

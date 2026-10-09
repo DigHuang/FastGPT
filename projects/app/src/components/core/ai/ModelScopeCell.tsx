@@ -4,17 +4,21 @@ import AvatarGroup, {
   type AvatarGroupItemType
 } from '@fastgpt/web/components/common/Avatar/AvatarGroup';
 import { LazyCollaboratorProvider } from '@/components/support/permission/MemberManager/context';
-import { getModelCollaborators, updateModelCollaborators } from '@/web/core/ai/model/api';
+import {
+  getModelCollaborators,
+  updateModelCollaborators
+} from '@/web/core/ai/model/collaboratorApi';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
-import { useClientTranslation } from '@fastgpt/web/i18n/useClientTranslation';
+import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
 import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import { ReadRoleVal } from '@fastgpt/global/support/permission/constant';
 import { DefaultGroupName } from '@fastgpt/global/support/user/team/group/constant';
 import {
   useModelCollaborators,
+  clearModelCollaboratorsCache,
   updateModelCollaboratorsCache
-} from './hooks/useModelCollaborators';
+} from '@/web/core/ai/model/useModelCollaborators';
 
 export type ModelScopeCellProps = BoxProps & {
   modelId?: string;
@@ -43,18 +47,32 @@ const ModelScopeCell = ({
   selectedHint,
   ...props
 }: ModelScopeCellProps) => {
-  const { t } = useClientTranslation(['config_model']);
+  const { t } = useSafeTranslation();
   const { userInfo } = useUserStore();
   const { feConfigs } = useSystemStore();
 
   const isSystem = scope === ModelScopeEnum.system;
-  const clbs = useModelCollaborators(modelId);
+  const { clbs, failed } = useModelCollaborators(modelId);
 
   const renderContent = () => {
     if (!modelId || !feConfigs.isPlus) {
       return (
         <Box color={'myGray.700'} fontSize={'sm'}>
           -
+        </Box>
+      );
+    }
+
+    if (failed) {
+      return (
+        <Box
+          as="button"
+          color="myGray.500"
+          fontSize="sm"
+          data-row-action
+          onClick={() => clearModelCollaboratorsCache(modelId)}
+        >
+          {t('common:load_failed')}
         </Box>
       );
     }

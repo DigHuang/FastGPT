@@ -1,16 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 
-// 使用测试环境的真实 MongoDB replica set，验证提交/回滚而非全局无事务 mock。
-vi.unmock(import('@fastgpt/service/common/mongo/sessionRun'));
-
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/defaultModel/schema';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
+import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 import {
-  readSystemModelRevision,
-  readSystemModelSnapshot,
-  runSystemModelTransaction
+  readModelCatalogRevision,
+  readModelCatalogSnapshot,
+  runModelTransaction
 } from '@fastgpt/service/core/ai/model/entity';
+
+// setup 已载入无事务 mock；修改同一 mock 函数的实现，让本文件使用真实 replica-set 事务。
+beforeAll(async () => {
+  const { mongoSessionRun: actualMongoSessionRun } = await vi.importActual<
+    typeof import('@fastgpt/service/common/mongo/sessionRun')
+  >('@fastgpt/service/common/mongo/sessionRun');
+  vi.mocked(mongoSessionRun).mockImplementation(actualMongoSessionRun);
+});
 
 const modelData = {
   scope: ModelScopeEnum.system,
@@ -26,9 +32,9 @@ beforeEach(async () => {
   await Promise.all([MongoAIModel.deleteMany({}), MongoAIDefaultModel.deleteMany({})]);
 });
 
-describe('runSystemModelTransaction', () => {
+describe('runModelTransaction', () => {
   it('commits model data, defaults and their revision together and returns the callback result', async () => {
-    const modelId = await runSystemModelTransaction(async (session) => {
+    const modelId = await runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
       expect(session.inTransaction()).toBe(true);
       const [model] = await MongoAIModel.create([modelData], { session });
       await MongoAIDefaultModel.updateOne(
@@ -39,19 +45,21 @@ describe('runSystemModelTransaction', () => {
       return String(model._id);
     });
 
-    await expect(readSystemModelRevision()).resolves.toBe(1);
-    await expect(readSystemModelSnapshot()).resolves.toMatchObject({
-      models: [{ model: modelData.model }],
-      defaultModelIds: { llm: modelId },
-      revision: 1
-    });
+    await expect(readModelCatalogRevision({ scope: ModelScopeEnum.system })).resolves.toBe(1);
+    await expect(readModelCatalogSnapshot({ scope: ModelScopeEnum.system })).resolves.toMatchObject(
+      {
+        models: [{ model: modelData.model }],
+        defaultModelIds: { llm: modelId },
+        revision: 1
+      }
+    );
   });
 
   it('rolls back both the first revision document and model writes if creation fails', async () => {
     const failure = new Error('abort initial catalog write');
 
     await expect(
-      runSystemModelTransaction(async (session) => {
+      runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
         await MongoAIModel.create([modelData], { session });
         throw failure;
       })
@@ -59,7 +67,7 @@ describe('runSystemModelTransaction', () => {
 
     await expect(MongoAIModel.countDocuments({})).resolves.toBe(0);
     await expect(MongoAIDefaultModel.countDocuments({})).resolves.toBe(0);
-    await expect(readSystemModelRevision()).resolves.toBe(0);
+    await expect(readModelCatalogRevision({ scope: ModelScopeEnum.system })).resolves.toBe(0);
   });
 
   it('rolls back an existing revision, model and defaults after a business failure', async () => {
@@ -72,7 +80,7 @@ describe('runSystemModelTransaction', () => {
     const failure = new Error('abort catalog update');
 
     await expect(
-      runSystemModelTransaction(async (session) => {
+      runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
         await MongoAIModel.updateOne(
           { _id: model._id },
           { $set: { name: 'Changed' } },
@@ -87,11 +95,13 @@ describe('runSystemModelTransaction', () => {
       })
     ).rejects.toBe(failure);
 
-    await expect(readSystemModelSnapshot()).resolves.toMatchObject({
-      models: [{ model: modelData.model, name: modelData.name }],
-      defaultModelIds: { llm: String(model._id) },
-      revision: 7
-    });
+    await expect(readModelCatalogSnapshot({ scope: ModelScopeEnum.system })).resolves.toMatchObject(
+      {
+        models: [{ model: modelData.model, name: modelData.name }],
+        defaultModelIds: { llm: String(model._id) },
+        revision: 7
+      }
+    );
   });
 
   it('serializes concurrent commits without losing revisions or model updates', async () => {
@@ -100,14 +110,14 @@ describe('runSystemModelTransaction', () => {
 
     await Promise.all(
       ['model-a', 'model-b', 'model-c'].map((model) =>
-        runSystemModelTransaction(async (session) => {
+        runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
           await MongoAIModel.create([{ ...modelData, model }], { session });
         })
       )
     );
 
-    await expect(readSystemModelRevision()).resolves.toBe(3);
-    const snapshot = await readSystemModelSnapshot();
+    await expect(readModelCatalogRevision({ scope: ModelScopeEnum.system })).resolves.toBe(3);
+    const snapshot = await readModelCatalogSnapshot({ scope: ModelScopeEnum.system });
     expect(snapshot.revision).toBe(3);
     expect(snapshot.models.map(({ model }) => model).sort()).toEqual([
       'model-a',
@@ -117,30 +127,30 @@ describe('runSystemModelTransaction', () => {
   });
 });
 
-describe('readSystemModelRevision', () => {
+describe('readModelCatalogRevision', () => {
   it('uses revision zero for an empty catalog and historical records without a revision', async () => {
-    await expect(readSystemModelRevision()).resolves.toBe(0);
+    await expect(readModelCatalogRevision({ scope: ModelScopeEnum.system })).resolves.toBe(0);
     await MongoAIDefaultModel.collection.insertOne({
       scope: ModelScopeEnum.system,
       defaultModelIds: {}
     });
 
-    await expect(readSystemModelRevision()).resolves.toBe(0);
-    await runSystemModelTransaction(async () => 'migrated');
-    await expect(readSystemModelRevision()).resolves.toBe(1);
+    await expect(readModelCatalogRevision({ scope: ModelScopeEnum.system })).resolves.toBe(0);
+    await runModelTransaction({ scope: ModelScopeEnum.system }, async () => 'migrated');
+    await expect(readModelCatalogRevision({ scope: ModelScopeEnum.system })).resolves.toBe(1);
   });
 });
 
-describe('readSystemModelSnapshot', () => {
+describe('readModelCatalogSnapshot', () => {
   it('returns empty defaults and revision zero when no catalog exists', async () => {
-    await expect(readSystemModelSnapshot()).resolves.toEqual({
+    await expect(readModelCatalogSnapshot({ scope: ModelScopeEnum.system })).resolves.toEqual({
       models: [],
       defaultModelIds: {},
       revision: 0
     });
   });
 
-  it('orders models newest first including system and team models', async () => {
+  it('orders models newest first and strictly excludes team models from system snapshot', async () => {
     const sampleTmbId = '68ad85a7463006c963799a05';
     await MongoAIModel.create([
       { ...modelData, model: 'first' },
@@ -151,9 +161,10 @@ describe('readSystemModelSnapshot', () => {
     const found = await MongoAIModel.findOne({ scope: ModelScopeEnum.team, tmbId: sampleTmbId });
     expect(found).toBeDefined();
 
-    const snapshot = await readSystemModelSnapshot();
+    const snapshot = await readModelCatalogSnapshot({ scope: ModelScopeEnum.system });
 
-    expect(snapshot.models.map(({ model }) => model)).toEqual(['team-only', 'second', 'first']);
+    expect(snapshot.models.map(({ model }) => model)).toEqual(['second', 'first']);
+    expect(snapshot.models.some(({ model }) => model === 'team-only')).toBe(false);
     expect(snapshot.defaultModelIds).toEqual({});
     expect(snapshot.revision).toBe(0);
   });
@@ -162,7 +173,7 @@ describe('readSystemModelSnapshot', () => {
     const model = await MongoAIModel.create(modelData);
     await MongoAIDefaultModel.create({ scope: ModelScopeEnum.system, catalogRevision: 4 });
 
-    await runSystemModelTransaction(async (session) => {
+    await runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
       await MongoAIModel.updateOne(
         { _id: model._id },
         { $set: { name: 'Committed name' } },
@@ -175,18 +186,22 @@ describe('readSystemModelSnapshot', () => {
       );
 
       // 独立读事务在写事务提交前只能看到完整的旧目录。
-      await expect(readSystemModelSnapshot()).resolves.toMatchObject({
+      await expect(
+        readModelCatalogSnapshot({ scope: ModelScopeEnum.system })
+      ).resolves.toMatchObject({
         models: [{ name: modelData.name }],
         defaultModelIds: {},
         revision: 4
       });
     });
 
-    await expect(readSystemModelSnapshot()).resolves.toMatchObject({
-      models: [{ name: 'Committed name' }],
-      defaultModelIds: { llm: String(model._id) },
-      revision: 5
-    });
+    await expect(readModelCatalogSnapshot({ scope: ModelScopeEnum.system })).resolves.toMatchObject(
+      {
+        models: [{ name: 'Committed name' }],
+        defaultModelIds: { llm: String(model._id) },
+        revision: 5
+      }
+    );
   });
 
   it('rejects invalid persisted default identifiers instead of publishing a partial snapshot', async () => {
@@ -196,6 +211,6 @@ describe('readSystemModelSnapshot', () => {
       defaultModelIds: { llm: 123 }
     });
 
-    await expect(readSystemModelSnapshot()).rejects.toThrow();
+    await expect(readModelCatalogSnapshot({ scope: ModelScopeEnum.system })).rejects.toThrow();
   });
 });

@@ -1,4 +1,4 @@
-import { getCachedModelHandle } from '@fastgpt/service/core/ai/model/handle';
+import { getCachedSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 import { getModelTestMap, setModelTestMap } from '@test/modelCache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
@@ -9,12 +9,16 @@ import {
 } from '../../../../core/dataset/search/vlm';
 
 const findMock = vi.hoisted(() => vi.fn());
+vi.mock('@fastgpt/service/core/ai/model', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@fastgpt/service/core/ai/model')>()),
+  getTeamModelHandle: async () => getCachedSystemModelHandle()!
+}));
 vi.mock('@fastgpt/service/core/dataset/schema', () => ({
   MongoDataset: { find: findMock }
 }));
 
 const findFirstDatasetSearchVlmModel = (input: Parameters<typeof resolveModels>[0]) =>
-  resolveModels(input, getCachedModelHandle()!);
+  resolveModels(input, getCachedSystemModelHandle()!);
 
 describe('dataset search VLM selection', () => {
   let originalMap: ReturnType<typeof getModelTestMap>;

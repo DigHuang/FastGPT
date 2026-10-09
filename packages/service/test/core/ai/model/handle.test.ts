@@ -9,7 +9,7 @@ import type {
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { UserError, getErrText } from '@fastgpt/global/common/error/utils';
 import { createModelHandle } from '../../../../core/ai/model/handle';
-import { isImageEmbeddingModel } from '../../../../core/ai/model';
+import { isImageEmbeddingModel } from '@fastgpt/global/core/ai/model/utils';
 
 const vlm: LLMSystemModelDataType = {
   modelId: '68ee0bd23d17260b7829b137',

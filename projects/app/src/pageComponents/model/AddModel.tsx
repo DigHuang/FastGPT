@@ -1,8 +1,8 @@
 import { useModelChannelTest } from './useModelChannelTest';
 import type { ModelChannelSummary } from '@fastgpt/global/openapi/core/ai/model/api';
-import type { ChannelType } from '@fastgpt/global/openapi/core/ai/model/channel/api';
+import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { getModelTemplates, postModelsFromTemplates } from '@/web/core/ai/model/api';
-import { defaultChannel } from '@fastgpt/global/core/ai/channel';
+import { defaultChannel } from '@fastgpt/global/core/ai/model/channel';
 import {
   Box,
   Button,
@@ -22,7 +22,7 @@ import {
 } from '@chakra-ui/react';
 import type { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import { modelTypeList, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import { channelTypeToScope, resolveChannelType } from '@fastgpt/global/core/ai/model';
+import { channelTypeToScope, resolveChannelType } from '@fastgpt/global/core/ai/model/utils';
 import type {
   SystemModelDataType,
   SystemModelDocumentDataType

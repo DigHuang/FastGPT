@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getCachedTypeMetas, resetChannelCache } from '@fastgpt/service/core/ai/channel/cache';
+import {
+  getCachedTypeMetas,
+  resetChannelCache
+} from '@fastgpt/service/core/ai/model/channel/cache';
 
 describe('channel type metas cache', () => {
   beforeEach(() => {

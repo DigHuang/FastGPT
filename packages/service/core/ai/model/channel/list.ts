@@ -1,13 +1,13 @@
 import type { ChannelListItem } from '@fastgpt/global/openapi/core/ai/model/channel/api';
-import type { AiproxyChannel, AiproxyGroupChannel } from '../../../thirdProvider/aiproxy/type';
-import { aiProxyClient } from '../../../thirdProvider/aiproxy/client';
+import type { AiproxyChannel, AiproxyGroupChannel } from '../../../../thirdProvider/aiproxy/type';
+import { getAiproxyClientByGroupId, getAiproxyClientByScope } from './client';
 import {
-  getOwnerAssociableModels,
   getSystemAssociableModels,
+  getOwnerAssociableModels,
   type ChannelAssociableModel
 } from './association';
-import { getMemberGroupId } from '../../../thirdProvider/aiproxy/group';
 
+/** 将 AIProxy 渠道投影为列表项，并按同一作用域的模型目录计算关联数。 */
 const buildChannelListItem = (
   channel: AiproxyChannel | AiproxyGroupChannel,
   bucketModels: ChannelAssociableModel[]
@@ -41,7 +41,7 @@ export const getSystemChannelList = async ({
   search?: string;
 } = {}): Promise<{ list: ChannelListItem[]; total: number }> => {
   const systemModels = await getSystemAssociableModels();
-  const { channels = [], total = 0 } = await aiProxyClient.system.channels.list({
+  const { channels = [], total = 0 } = await getAiproxyClientByGroupId().channels.list({
     page: pageNum,
     perPage: pageSize,
     search
@@ -54,20 +54,23 @@ export const getSystemChannelList = async ({
 
 /** 获取当前成员渠道分页列表，并补充成员模型关联数。 */
 export const getMemberChannelList = async ({
+  teamId,
   tmbId,
   pageNum,
   pageSize,
   search
 }: {
+  teamId: string;
   tmbId: string;
   pageNum?: number;
   pageSize?: number;
   search?: string;
 }): Promise<{ list: ChannelListItem[]; total: number }> => {
-  const ownerModels = await getOwnerAssociableModels(tmbId);
-  const { channels = [], total = 0 } = await aiProxyClient
-    .group(getMemberGroupId(tmbId))
-    .channels.list({ page: pageNum, perPage: pageSize, search });
+  const ownerModels = await getOwnerAssociableModels({ teamId, tmbId });
+  const { channels = [], total = 0 } = await getAiproxyClientByScope({
+    channelType: 'team',
+    tmbId
+  }).channels.list({ page: pageNum, perPage: pageSize, search });
   return {
     list: channels.map((channel) => buildChannelListItem(channel, ownerModels)),
     total

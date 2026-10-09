@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from '@fastgpt/service/common/mongo';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/defaultModel/schema';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
 import { MongoDataset } from '@fastgpt/service/core/dataset/schema';
 import type { SystemMigrationContext } from '@/migration/registry';
 import type { SystemMigrationFailedRecord } from '@fastgpt/global/migration/schema';

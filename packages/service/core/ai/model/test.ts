@@ -9,7 +9,7 @@ import type {
 import { isProduction } from '@fastgpt/global/common/system/constants';
 import { UserError } from '@fastgpt/global/common/error/utils';
 import { getLogger, LogCategories } from '../../../common/logger';
-import { getAIApi, getModelOpenAIOptions } from '../config';
+import { requestSpeech } from '../audio/speech';
 import { getVectors } from '../embedding';
 import { aiTranscriptions } from '../audio/transcriptions';
 import { reRankRecall } from '../rerank';
@@ -180,24 +180,17 @@ const testTTSModel = async ({
   const voice = model.config.voices[0]?.value;
   if (!voice) throw new UserError('TTS model test requires at least one voice');
 
-  const { ai, requestMeta } = getAIApi({ timeout: timeoutMs });
-  onRequestStart?.();
-  await ai.audio.speech.create(
-    {
-      model: model.model,
-      voice: voice as any,
-      input: 'Hi',
-      response_format: 'mp3',
-      speed: 1
-    },
-    getModelOpenAIOptions({
-      model,
-      baseUrl: requestMeta?.baseUrl,
-      headers,
-      signal,
-      maxRetries: 0
-    })
-  );
+  await requestSpeech({
+    model,
+    voice,
+    input: 'Hi',
+    speed: 1,
+    timeoutMs,
+    headers,
+    signal,
+    maxRetries: 0,
+    onRequestStart
+  });
 };
 
 /**

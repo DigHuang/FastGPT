@@ -3,7 +3,7 @@ import ChannelStatusTag from './ChannelStatusTag';
 import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
 import type { SystemModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
 import type { ModelChannelSummary } from '@fastgpt/global/openapi/core/ai/model/api';
-import type { ChannelType } from '@fastgpt/global/openapi/core/ai/model/channel/api';
+import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import {
   Box,
   Button,

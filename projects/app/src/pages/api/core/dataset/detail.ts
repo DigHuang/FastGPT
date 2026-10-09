@@ -1,4 +1,4 @@
-import { getModelHandle } from '@fastgpt/service/core/ai/model';
+import { getTeamModelHandle } from '@fastgpt/service/core/ai/model/index';
 import { getDatasetModelReference } from '@fastgpt/service/core/dataset/model';
 import { desensitizeSystemModel } from '@fastgpt/service/core/ai/model/transform';
 import { authDataset } from '@fastgpt/service/support/permission/dataset/auth';
@@ -31,7 +31,7 @@ async function handler(req: ApiRequestProps): Promise<GetDatasetDetailResponse> 
     getDatasetSyncDatasetStatus(datasetId),
     hasDatasetTrainingTask({ teamId: dataset.teamId, datasetId })
   ]);
-  const modelHandle = await getModelHandle({ teamId: String(dataset.teamId) });
+  const modelHandle = await getTeamModelHandle({ teamId: String(dataset.teamId) });
   const vectorModel = modelHandle.findModelData(getDatasetModelReference(dataset, 'embedding'), {
     type: 'embedding'
   });

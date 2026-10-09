@@ -1,11 +1,11 @@
-import { Types } from '../../../common/mongo';
-import { getModelHandle } from '../model';
-import { getTeamModelsByTmbId } from '../model/teamModelCache';
-import { hasLegacyRequestUrl } from '../legacy/requestUrl';
-import { aiProxyClient } from '../../../thirdProvider/aiproxy/client';
-import type { AiproxyChannel, AiproxyGroupChannel } from '../../../thirdProvider/aiproxy/type';
-import { parseTmbIdFromGroupId } from '../../../thirdProvider/aiproxy/group';
+import { Types } from '../../../../common/mongo';
+import { getSystemModelHandle, getTeamModelHandle } from '../index';
+import { hasLegacyRequestUrl } from '../../legacy/requestUrl';
+import type { AiproxyChannel, AiproxyGroupChannel } from '../../../../thirdProvider/aiproxy/type';
+import { parseTmbIdFromGroupId } from '../../../../thirdProvider/aiproxy/group';
+import { getAiproxyClientByGroupId } from './client';
 
+/** 渠道关联查询使用的模型投影，不携带完整模型配置。 */
 export type ChannelAssociableModel = {
   id: string;
   model: string;
@@ -17,7 +17,7 @@ export type ChannelAssociableModel = {
 
 /** 从运行时目录读取系统模型桶。 */
 export const getSystemAssociableModels = async (): Promise<ChannelAssociableModel[]> => {
-  const handle = await getModelHandle();
+  const handle = await getSystemModelHandle();
   return handle.getSystemModels().map((item) => ({
     id: item.modelId,
     model: item.model,
@@ -28,12 +28,17 @@ export const getSystemAssociableModels = async (): Promise<ChannelAssociableMode
 };
 
 /** 从团队模型缓存读取指定成员拥有的团队模型桶（复用 LRU 缓存与版本管理）。 */
-export const getOwnerAssociableModels = async (
-  tmbId: string
-): Promise<ChannelAssociableModel[]> => {
+export const getOwnerAssociableModels = async ({
+  teamId,
+  tmbId
+}: {
+  teamId: string;
+  tmbId: string;
+}): Promise<ChannelAssociableModel[]> => {
   if (!tmbId || !Types.ObjectId.isValid(tmbId)) return [];
 
-  const models = await getTeamModelsByTmbId(tmbId);
+  const handle = await getTeamModelHandle({ teamId });
+  const models = handle.getTeamModels(tmbId);
 
   return models.map((item) => ({
     id: item.modelId,
@@ -46,13 +51,15 @@ export const getOwnerAssociableModels = async (
 
 /** 计算删除单个渠道后将失去全部渠道的模型。 */
 export const getChannelAffectedModels = async (
-  channel: AiproxyChannel | AiproxyGroupChannel
+  channel: AiproxyChannel | AiproxyGroupChannel,
+  teamId: string
 ): Promise<{ modelId: string; name: string; model: string }[]> =>
-  getBatchChannelsAffectedModels([channel]);
+  getBatchChannelsAffectedModels([channel], teamId);
 
 /** 计算批量删除渠道后将失去全部渠道的模型。 */
 export const getBatchChannelsAffectedModels = async (
-  channels: Array<AiproxyChannel | AiproxyGroupChannel>
+  channels: Array<AiproxyChannel | AiproxyGroupChannel>,
+  teamId: string
 ): Promise<{ modelId: string; name: string; model: string }[]> => {
   if (channels.length === 0) return [];
 
@@ -69,13 +76,13 @@ export const getBatchChannelsAffectedModels = async (
     const bucketModels = isSystem
       ? await getSystemAssociableModels()
       : tmbId
-        ? await getOwnerAssociableModels(tmbId)
+        ? await getOwnerAssociableModels({ teamId, tmbId })
         : [];
     if (bucketModels.length === 0) continue;
 
-    const allChannels = isSystem
-      ? await aiProxyClient.system.channels.listAll()
-      : await aiProxyClient.group(bucketKey).channels.listAll();
+    const allChannels = await getAiproxyClientByGroupId(
+      isSystem ? undefined : bucketKey
+    ).channels.listAll();
     const deletedIds = new Set(targetChannels.map((channel) => channel.id));
     const remainingModelNames = new Set(
       allChannels
@@ -101,13 +108,14 @@ export const getBatchChannelsAffectedModels = async (
 
 /** 获取指定渠道在自身桶内关联的模型列表。 */
 export const getChannelModels = async (
-  channel: AiproxyChannel | AiproxyGroupChannel
+  channel: AiproxyChannel | AiproxyGroupChannel,
+  teamId: string
 ): Promise<{ modelId: string; name: string; model: string }[]> => {
   const groupId = (channel as AiproxyGroupChannel).group_id;
   const tmbId = groupId ? parseTmbIdFromGroupId(groupId) : undefined;
   const bucketModels = groupId
     ? tmbId
-      ? await getOwnerAssociableModels(tmbId)
+      ? await getOwnerAssociableModels({ teamId, tmbId })
       : []
     : await getSystemAssociableModels();
   const channelModels = new Set(channel.models ?? []);

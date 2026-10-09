@@ -3,8 +3,8 @@ import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import {
   findSystemDefaultModelIds,
   upsertSystemDefaultModelIds
-} from '@fastgpt/service/core/ai/defaultModel/entity';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/defaultModel/schema';
+} from '@fastgpt/service/core/ai/model/default/entity';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
 
 describe('AI default model entity', () => {
   beforeEach(async () => {

@@ -1,4 +1,4 @@
-import { getCachedModelHandle } from '@fastgpt/service/core/ai/model/handle';
+import { getCachedSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 import {
   getModelTestMap,
   getModelTestDefaults,
@@ -16,7 +16,7 @@ import { UserError } from '@fastgpt/global/common/error/utils';
 import { getDatasetSearchAuxiliaryModels as resolveModels } from '../../../../core/dataset/search/auxiliaryModels';
 
 const getDatasetSearchAuxiliaryModels = (input: Parameters<typeof resolveModels>[0]) =>
-  resolveModels(input, getCachedModelHandle()!);
+  resolveModels(input, getCachedSystemModelHandle()!);
 
 describe('getDatasetSearchAuxiliaryModels', () => {
   const llm: LLMSystemModelDataType = {
@@ -112,7 +112,7 @@ describe('getDatasetSearchAuxiliaryModels', () => {
           usingReRank: false,
           datasetSearchUsingExtensionQuery: false
         },
-        { ...getCachedModelHandle()!, getDefaultModelData }
+        { ...getCachedSystemModelHandle()!, getDefaultModelData }
       )
     ).toEqual({ rerankModelData: undefined, extensionModelData: undefined });
     expect(getDefaultModelData).not.toHaveBeenCalled();
@@ -143,7 +143,7 @@ describe('getDatasetSearchAuxiliaryModels', () => {
         resolveModels(
           { datasetSearchUsingExtensionQuery: true },
           {
-            ...getCachedModelHandle()!,
+            ...getCachedSystemModelHandle()!,
             getLLMModelData: () => {
               throw error;
             }

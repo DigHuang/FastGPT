@@ -13,6 +13,7 @@ export const resolveEffectiveDefaultModelIds = ({
   models: SystemModelDataType[];
   configuredDefaults: ModelDefaultIds;
 }): ModelDefaultIds => {
+  models = models.filter((model) => model.isActive);
   const modelMap = new Map(models.map((model) => [model.modelId, model]));
   const resolve = ({
     configuredId,
@@ -38,11 +39,9 @@ export const resolveEffectiveDefaultModelIds = ({
     ? modelMap.get(configuredDefaults.datasetImageLLM)
     : undefined;
 
+  const llm = resolve({ configuredId: configuredDefaults.llm, type: ModelTypeEnum.llm });
   return {
-    [ModelTypeEnum.llm]: resolve({
-      configuredId: configuredDefaults.llm,
-      type: ModelTypeEnum.llm
-    }),
+    [ModelTypeEnum.llm]: llm,
     [ModelTypeEnum.embedding]: resolve({
       configuredId: configuredDefaults.embedding,
       type: ModelTypeEnum.embedding
@@ -60,7 +59,10 @@ export const resolveEffectiveDefaultModelIds = ({
       type: ModelTypeEnum.rerank
     }),
     datasetTextLLM: resolve({
-      configuredId: configuredDefaults.datasetTextLLM,
+      configuredId:
+        modelMap.get(configuredDefaults.datasetTextLLM ?? '')?.type === ModelTypeEnum.llm
+          ? configuredDefaults.datasetTextLLM
+          : llm,
       type: ModelTypeEnum.llm
     }),
     datasetImageLLM:

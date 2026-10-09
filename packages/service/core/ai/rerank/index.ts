@@ -1,4 +1,4 @@
-import { getModelHandle } from '../model';
+import { getSystemModelHandle } from '../model/index';
 import { axiosWithoutSSRF } from '../../../common/api/axios';
 
 import { getModelAxiosConfig } from '../config';
@@ -47,7 +47,7 @@ export async function reRankRecall({
   signal?: AbortSignal;
   onRequestStart?: () => void;
 }): Promise<ReRankCallResult> {
-  const model = inputModel ?? (await getModelHandle()).getDefaultModelData('rerank');
+  const model = inputModel ?? (await getSystemModelHandle()).getDefaultModelData('rerank');
 
   if (!model) {
     return Promise.reject(new UserError(ModelErrEnum.unExist));

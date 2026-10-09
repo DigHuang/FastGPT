@@ -1,4 +1,4 @@
-import { getCachedModelHandle } from '@fastgpt/service/core/ai/model/handle';
+import { getCachedSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 import { getModelTestDefaults, setModelTestSnapshot } from '@test/modelCache';
 import handler from '@/pages/api/core/app/version/publish';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
@@ -26,11 +26,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 describe('publish optional model defaults', () => {
   let previousModels: ReturnType<
-    NonNullable<ReturnType<typeof getCachedModelHandle>>['getActiveModels']
+    NonNullable<ReturnType<typeof getCachedSystemModelHandle>>['getActiveModels']
   >;
   let previousDefaults: ReturnType<typeof getModelTestDefaults>;
   beforeEach(() => {
-    previousModels = getCachedModelHandle()!.getActiveModels();
+    previousModels = getCachedSystemModelHandle()!.getActiveModels();
     previousDefaults = getModelTestDefaults();
     const llm = previousDefaults.llm!;
     const rerank: RerankSystemModelDataType = {

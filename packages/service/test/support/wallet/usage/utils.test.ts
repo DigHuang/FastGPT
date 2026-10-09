@@ -44,7 +44,15 @@ const mockModels: Record<string, SystemModelDataType> = {
 };
 
 vi.mock('@fastgpt/service/core/ai/model', () => ({
-  getModelHandle: async () => ({
+  getSystemModelHandle: async () => ({
+    findModelData: (reference: { modelId?: string; model?: string }) => {
+      if (reference.modelId) {
+        return Object.values(mockModels).find((model) => model.modelId === reference.modelId);
+      }
+      return reference.model ? mockModels[reference.model] : undefined;
+    }
+  }),
+  getTeamModelHandle: async () => ({
     findModelData: (reference: { modelId?: string; model?: string }) => {
       if (reference.modelId) {
         return Object.values(mockModels).find((model) => model.modelId === reference.modelId);

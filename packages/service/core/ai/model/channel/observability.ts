@@ -5,7 +5,7 @@ import type {
   GetChannelLogsQuery,
   GetChannelLogsResponse
 } from '@fastgpt/global/openapi/core/ai/model/channel/api';
-import { aiProxyClient } from '../../../thirdProvider/aiproxy/client';
+import { getAiproxyClientByGroupId } from './client';
 
 /** 查询 system 或当前成员 group-channel 的调用日志。groupId 只能由服务端会话推导。 */
 export const searchChannelLogs = ({
@@ -13,10 +13,7 @@ export const searchChannelLogs = ({
   ...params
 }: Omit<GetChannelLogsQuery, 'channelType'> & {
   groupId?: string;
-}): Promise<GetChannelLogsResponse> =>
-  groupId
-    ? aiProxyClient.group(groupId).logs.search(params)
-    : aiProxyClient.system.logs.search(params);
+}): Promise<GetChannelLogsResponse> => getAiproxyClientByGroupId(groupId).logs.search(params);
 
 /** 获取 system 或当前成员 group-channel 范围内的单条日志详情。 */
 export const getChannelLogDetail = ({
@@ -25,8 +22,7 @@ export const getChannelLogDetail = ({
 }: {
   id: number;
   groupId?: string;
-}): Promise<GetChannelLogDetailResponse> =>
-  groupId ? aiProxyClient.group(groupId).logs.detail(id) : aiProxyClient.system.logs.detail(id);
+}): Promise<GetChannelLogDetailResponse> => getAiproxyClientByGroupId(groupId).logs.detail(id);
 
 /** 查询 system 或当前成员 group-channel 的时序监控数据。 */
 export const getChannelDashboard = ({
@@ -34,7 +30,4 @@ export const getChannelDashboard = ({
   ...params
 }: Omit<GetChannelDashboardQuery, 'channelType'> & {
   groupId?: string;
-}): Promise<ChannelDashboardPoint[]> =>
-  groupId
-    ? aiProxyClient.group(groupId).dashboard.get(params)
-    : aiProxyClient.system.dashboard.get(params);
+}): Promise<ChannelDashboardPoint[]> => getAiproxyClientByGroupId(groupId).dashboard.get(params);

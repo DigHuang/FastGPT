@@ -76,7 +76,9 @@ describe('getChatModelNameListByModules', () => {
       createNode({ value: activeModelId })
     ];
 
-    expect(await getChatModelNameListByModules(nodes)).toEqual(['GPT test']);
+    expect(
+      await getChatModelNameListByModules(nodes, { teamId: '68ad85a7463006c963799a06' })
+    ).toEqual(['GPT test']);
   });
 
   it('skips unresolved references without blocking chat initialization', async () => {
@@ -90,6 +92,8 @@ describe('getChatModelNameListByModules', () => {
       createNode({ value: activeModelId, flowNodeType: FlowNodeTypeEnum.pluginModule })
     ];
 
-    expect(await getChatModelNameListByModules(nodes)).toEqual([]);
+    expect(
+      await getChatModelNameListByModules(nodes, { teamId: '68ad85a7463006c963799a06' })
+    ).toEqual([]);
   });
 });

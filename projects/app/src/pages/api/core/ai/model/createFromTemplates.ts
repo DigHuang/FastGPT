@@ -1,6 +1,6 @@
 import type { ApiRequestProps } from '@fastgpt/next/type';
 import { NextAPI } from '@/service/middleware/entry';
-import { authModelManage } from '@fastgpt/service/support/permission/model/controller';
+import { authModelManage } from '@fastgpt/service/support/permission/model/auth';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import { createModelsFromTemplates } from '@fastgpt/service/core/ai/model/mutation';
 import {

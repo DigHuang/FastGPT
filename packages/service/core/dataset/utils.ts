@@ -1,7 +1,7 @@
 import { authDatasetByTmbId } from '../../support/permission/dataset/auth';
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
 import { getLogger, LogCategories } from '../../common/logger';
-import { isImageEmbeddingModel } from '../ai/model';
+import { isImageEmbeddingModel } from '@fastgpt/global/core/ai/model/utils';
 import { TrainingModeEnum } from '@fastgpt/global/core/dataset/constants';
 import type {
   EmbeddingSystemModelDataType,

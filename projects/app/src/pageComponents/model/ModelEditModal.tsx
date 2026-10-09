@@ -1,8 +1,8 @@
-import { defaultChannel } from '@fastgpt/global/core/ai/channel';
+import { defaultChannel } from '@fastgpt/global/core/ai/model/channel';
 import { Button } from '@chakra-ui/react';
 import type { ModelProviderItemType } from '@fastgpt/global/core/ai/model/provider';
-import type { SystemModelListItem } from '@fastgpt/global/openapi/core/ai/model/api';
-import type { ChannelType } from '@fastgpt/global/openapi/core/ai/model/channel/api';
+import type { ModelConfigListItem } from '@fastgpt/global/openapi/core/ai/model/api';
+import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import MyModal from '@fastgpt/web/components/v2/common/MyModal';
 import dynamic from 'next/dynamic';
 import ModelConfigForm from './ModelConfigForm';
@@ -22,7 +22,7 @@ const ModelEditModal = ({
   onSuccess,
   onClose
 }: {
-  model: SystemModelListItem;
+  model: ModelConfigListItem;
   providers: ModelProviderItemType[];
   channelType: ChannelType;
   onSuccess: () => void | Promise<void>;

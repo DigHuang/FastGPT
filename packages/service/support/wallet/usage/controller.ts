@@ -1,4 +1,4 @@
-import { getModelHandle } from '../../../core/ai/model';
+import { getSystemModelHandle } from '../../../core/ai/model/index';
 import { UsageItemTypeEnum, UsageSourceEnum } from '@fastgpt/global/support/wallet/usage/constants';
 import { MongoUsage } from './schema';
 import { type ClientSession } from '../../../common/mongo';
@@ -181,7 +181,7 @@ export const pushWhisperUsage = async ({
   duration: number;
   source: UsageSourceEnum;
 }) => {
-  const modelHandle = await getModelHandle();
+  const modelHandle = await getSystemModelHandle();
   const whisperModel = modelHandle.getDefaultModelData('stt');
 
   const { totalPoints, modelId } = formatModelChars2Points({

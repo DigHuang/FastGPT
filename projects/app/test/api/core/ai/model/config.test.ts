@@ -19,7 +19,7 @@ const aiproxyMocks = vi.hoisted(() => {
 const mocks = vi.hoisted(() => ({
   authSystemAdmin: vi.fn(),
   authUserPer: vi.fn(),
-  findMongoAIModel: vi.fn(),
+  getTeamModels: vi.fn(),
   getSystemChannelSummaryItems: vi.fn()
 }));
 
@@ -28,8 +28,9 @@ vi.mock('@fastgpt/service/support/permission/user/auth', () => ({
   authSystemAdmin: mocks.authSystemAdmin,
   authUserPer: mocks.authUserPer
 }));
-vi.mock('@fastgpt/service/core/ai/channel/summary', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@fastgpt/service/core/ai/channel/summary')>();
+vi.mock('@fastgpt/service/core/ai/model/channel/summary', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@fastgpt/service/core/ai/model/channel/summary')>();
   return {
     ...actual,
     getSystemChannelSummaryItems: mocks.getSystemChannelSummaryItems
@@ -45,13 +46,14 @@ vi.mock('@fastgpt/service/thirdProvider/aiproxy/client', async (importOriginal) 
     }
   };
 });
-vi.mock('@fastgpt/service/core/ai/model/schema', () => ({
-  MongoAIModel: {
-    find: mocks.findMongoAIModel
-  }
+vi.mock('@fastgpt/service/core/ai/model/index', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@fastgpt/service/core/ai/model/index')>()),
+  getTeamModelHandle: vi.fn(async () => ({ getTeamModels: mocks.getTeamModels }))
 }));
 
 import handler from '@/pages/api/core/ai/model/config';
+
+const teamMemberId = '68ad85a7463006c963799a06';
 
 describe('GET /api/core/ai/model/config', () => {
   beforeEach(() => {
@@ -173,27 +175,24 @@ describe('GET /api/core/ai/model/config', () => {
   describe('channelType=team', () => {
     beforeEach(() => {
       mocks.authUserPer.mockResolvedValue({
-        tmbId: 'tmb_123',
+        tmbId: teamMemberId,
         isRoot: false,
         tmb: { permission: { hasModelCreatePer: true } }
       });
-      mocks.findMongoAIModel.mockReturnValue({
-        sort: vi.fn().mockReturnValue({
-          lean: vi.fn().mockResolvedValue([
-            {
-              _id: 'team_model_1',
-              model: 'qwen-plus',
-              name: 'Qwen Plus',
-              provider: 'OpenAI',
-              scope: ModelScopeEnum.team,
-              type: ModelTypeEnum.llm,
-              isActive: true,
-              tmbId: 'tmb_123',
-              config: { maxContext: 32000, maxResponse: 4000, quoteMaxToken: 8000 }
-            }
-          ])
-        })
-      });
+      mocks.getTeamModels.mockReturnValue([
+        {
+          modelId: 'team_model_1',
+          model: 'qwen-plus',
+          name: 'Qwen Plus',
+          provider: 'OpenAI',
+          avatar: 'model/openai',
+          scope: ModelScopeEnum.team,
+          type: ModelTypeEnum.llm,
+          isActive: true,
+          tmbId: teamMemberId,
+          config: { maxContext: 32000, maxResponse: 4000, quoteMaxToken: 8000 }
+        }
+      ]);
       aiproxyMocks.listAll.mockResolvedValue([
         {
           id: 10,
@@ -210,7 +209,8 @@ describe('GET /api/core/ai/model/config', () => {
       } as never)) as any;
 
       expect(mocks.authUserPer).toHaveBeenCalledOnce();
-      expect(aiproxyMocks.group).toHaveBeenCalledWith('fastgpt:tmb:tmb_123');
+      expect(mocks.getTeamModels).toHaveBeenCalledWith(teamMemberId);
+      expect(aiproxyMocks.group).toHaveBeenCalledWith(`fastgpt:tmb:${teamMemberId}`);
 
       expect(result.models.map((m: any) => m.modelId)).toEqual(['team_model_1']);
       expect(result.models[0].model).toBe('qwen-plus');

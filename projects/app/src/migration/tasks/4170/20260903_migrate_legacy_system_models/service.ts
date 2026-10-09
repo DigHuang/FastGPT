@@ -9,8 +9,8 @@ import { LegacySystemModelCollectionName } from '@fastgpt/service/core/ai/model/
 import { getLegacyDefaultModelFlags, repairSystemModelDocument } from './utils';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
 import { assertSystemModelTypesMatchPluginTemplates } from '@fastgpt/service/core/ai/model/transform';
-import { upsertSystemDefaultModelIds } from '@fastgpt/service/core/ai/defaultModel/entity';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/defaultModel/schema';
+import { upsertSystemDefaultModelIds } from '@fastgpt/service/core/ai/model/default/entity';
+import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
 
 export type BootstrapAIModelsResult = {
   status: 'migrated';

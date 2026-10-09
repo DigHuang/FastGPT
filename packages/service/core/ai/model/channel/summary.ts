@@ -1,8 +1,7 @@
-import { getModelProviderMetadata } from '../model/provider/controller';
-import { aiProxyClient } from '../../../thirdProvider/aiproxy/client';
-import type { AiproxyChannel, AiproxyGroupChannel } from '../../../thirdProvider/aiproxy/type';
-import { getMemberGroupId } from '../../../thirdProvider/aiproxy/group';
-import { tolerateNotFound } from '../../../thirdProvider/aiproxy/error';
+import { getModelProviderMetadata } from '../provider/controller';
+import type { AiproxyChannel, AiproxyGroupChannel } from '../../../../thirdProvider/aiproxy/type';
+import { tolerateNotFound } from '../../../../thirdProvider/aiproxy/error';
+import { getAiproxyClientByGroupId, getAiproxyClientByScope } from './client';
 
 /** 将 AI Proxy 渠道转换为模型管理界面使用的稳定摘要结构。 */
 export const formatChannelSummaryItems = (
@@ -55,14 +54,14 @@ export const groupChannelSummariesByModel = (
 /** 获取系统模型桶使用的渠道摘要。 */
 export const getSystemChannelSummaryItems = async () =>
   formatChannelSummaryItems(
-    await tolerateNotFound(() => aiProxyClient.system.channels.listAll(), [])
+    await tolerateNotFound(() => getAiproxyClientByGroupId().channels.listAll(), [])
   );
 
 /** 获取指定成员模型桶使用的渠道摘要。 */
 export const getMemberChannelSummaryItems = async (tmbId: string) =>
   formatChannelSummaryItems(
     await tolerateNotFound(
-      () => aiProxyClient.group(getMemberGroupId(tmbId)).channels.listAll(),
+      () => getAiproxyClientByScope({ channelType: 'team', tmbId }).channels.listAll(),
       []
     )
   );

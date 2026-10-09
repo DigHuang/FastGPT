@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import { createModelHandle, publishModelHandle } from '@fastgpt/service/core/ai/model/handle';
-import { clearTeamModelCache } from '@fastgpt/service/core/ai/model/teamModelCache';
+import { createModelHandle } from '@fastgpt/service/core/ai/model/handle';
+import { publishSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
+import { clearTeamModelCatalogCache } from '@fastgpt/service/core/ai/model/teamModelCache';
 
-const { axiosMock, getConfigMock, getTeamModelsByTmbIdMock } = vi.hoisted(() => ({
+const { axiosMock, getConfigMock, getTeamModelHandleMock } = vi.hoisted(() => ({
   axiosMock: vi.fn(),
   getConfigMock: vi.fn(() => ({ baseUrl: 'http://aiproxy.test', token: 'test-token' })),
-  getTeamModelsByTmbIdMock: vi.fn()
+  getTeamModelHandleMock: vi.fn()
 }));
 
 vi.mock('@fastgpt/service/common/api/axios', () => ({
@@ -18,9 +19,9 @@ vi.mock('@fastgpt/service/thirdProvider/aiproxy/config', () => ({
   getAIProxyAdminConfig: getConfigMock
 }));
 
-vi.mock('@fastgpt/service/core/ai/model/teamModelCache', () => ({
-  clearTeamModelCache: vi.fn(),
-  getTeamModelsByTmbId: getTeamModelsByTmbIdMock
+vi.mock('@fastgpt/service/core/ai/model/index', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@fastgpt/service/core/ai/model/index')>()),
+  getTeamModelHandle: getTeamModelHandleMock
 }));
 
 import {
@@ -28,11 +29,13 @@ import {
   getChannelAffectedModels,
   getChannelModels,
   getSystemAssociableModels
-} from '@fastgpt/service/core/ai/channel/association';
-import { getMemberChannelList, getSystemChannelList } from '@fastgpt/service/core/ai/channel/list';
-import { resolveChannelForOperation } from '@fastgpt/service/core/ai/channel/resolve';
-import { isAiproxyNotFoundError } from '@fastgpt/service/thirdProvider/aiproxy/error';
-import { resetChannelCache } from '@fastgpt/service/core/ai/channel/cache';
+} from '@fastgpt/service/core/ai/model/channel/association';
+import {
+  getMemberChannelList,
+  getSystemChannelList
+} from '@fastgpt/service/core/ai/model/channel/list';
+import { resolveChannelForOperation } from '@fastgpt/service/core/ai/model/channel/resolve';
+import { resetChannelCache } from '@fastgpt/service/core/ai/model/channel/cache';
 import type {
   AiproxyChannel,
   AiproxyGroupChannel
@@ -143,7 +146,7 @@ const setupModels = () => {
     isSystem: m.scope === ModelScopeEnum.system,
     tmbId: m.tmbId
   }));
-  publishModelHandle(
+  publishSystemModelHandle(
     createModelHandle({
       models: models as any,
       defaultModels: {} as any,
@@ -153,22 +156,23 @@ const setupModels = () => {
     })
   );
 
-  getTeamModelsByTmbIdMock.mockImplementation(async (tmbId: string) =>
-    testModels
-      .filter((m) => !m.isSystem && m.tmbId === tmbId)
-      .map((m) => ({
-        modelId: m.id,
-        model: m.model,
-        name: m.name,
-        type: ModelTypeEnum.llm,
-        provider: 'test',
-        scope: ModelScopeEnum.team,
-        isSystem: false,
-        tmbId: m.tmbId,
-        isActive: true,
-        config: { maxContext: 16000, maxResponse: 4000, quoteMaxToken: 2000 }
-      }))
-  );
+  getTeamModelHandleMock.mockImplementation(async () => ({
+    getTeamModels: (tmbId: string) =>
+      testModels
+        .filter((m) => !m.isSystem && m.tmbId === tmbId)
+        .map((m) => ({
+          modelId: m.id,
+          model: m.model,
+          name: m.name,
+          type: ModelTypeEnum.llm,
+          provider: 'test',
+          scope: ModelScopeEnum.team,
+          isSystem: false,
+          tmbId: m.tmbId,
+          isActive: true,
+          config: { maxContext: 16000, maxResponse: 4000, quoteMaxToken: 2000 }
+        }))
+  }));
 };
 
 const mockChannels = () => {
@@ -196,7 +200,7 @@ const mockChannels = () => {
 
 describe('channel controller — delete protection / refs', () => {
   beforeEach(() => {
-    clearTeamModelCache();
+    clearTeamModelCatalogCache();
     setupModels();
     mockChannels();
     resetChannelCache();
@@ -204,20 +208,23 @@ describe('channel controller — delete protection / refs', () => {
 
   it('getChannelAffectedModels keeps models served by exactly one channel of the bucket', async () => {
     // text-embedding-3-small is only on ch-sys-3 → affected
-    const sysAffected = await getChannelAffectedModels(SYSTEM_CHANNELS[2]);
+    const sysAffected = await getChannelAffectedModels(
+      SYSTEM_CHANNELS[2],
+      '6000000000000000000000aa'
+    );
     expect(sysAffected).toEqual([
       { modelId: 'sys-emb-1', name: 'Sys Embedding', model: 'text-embedding-3-small' }
     ]);
 
     // gpt-4o is on two system channels → not affected
-    const sysSafe = await getChannelAffectedModels(SYSTEM_CHANNELS[0]);
+    const sysSafe = await getChannelAffectedModels(SYSTEM_CHANNELS[0], '6000000000000000000000aa');
     expect(sysSafe).toEqual([]);
 
     // When both channels providing gpt-4o are deleted together, gpt-4o is affected
-    const batchAffected = await getBatchChannelsAffectedModels([
-      SYSTEM_CHANNELS[0],
-      SYSTEM_CHANNELS[1]
-    ]);
+    const batchAffected = await getBatchChannelsAffectedModels(
+      [SYSTEM_CHANNELS[0], SYSTEM_CHANNELS[1]],
+      '6000000000000000000000aa'
+    );
     expect(batchAffected).toEqual([
       { modelId: 'sys-llm-1', name: 'Sys GPT-4o', model: 'gpt-4o' },
       { modelId: 'sys-llm-2', name: 'Sys Claude', model: 'claude-3-5-sonnet' }
@@ -234,7 +241,7 @@ describe('channel controller — delete protection / refs', () => {
     });
     (directModel as any).requestUrl = 'http://localhost:8000/v1';
 
-    publishModelHandle(
+    publishSystemModelHandle(
       createModelHandle({
         models: [
           ...testModels.map((m) =>
@@ -256,7 +263,7 @@ describe('channel controller — delete protection / refs', () => {
 
     // SYSTEM_CHANNELS[2] serves 'text-embedding-3-small'.
     // If deleted, normal sys-emb-1 is affected, but sys-direct-1 is NOT affected.
-    const affected = await getChannelAffectedModels(SYSTEM_CHANNELS[2]);
+    const affected = await getChannelAffectedModels(SYSTEM_CHANNELS[2], '6000000000000000000000aa');
     expect(affected).toEqual([
       { modelId: 'sys-emb-1', name: 'Sys Embedding', model: 'text-embedding-3-small' }
     ]);
@@ -265,24 +272,30 @@ describe('channel controller — delete protection / refs', () => {
 
   it('group bucket counts ignore other members channels (route scope isolation)', async () => {
     // qwen-plus appears once within group A (ch-b-1 is another owner's bucket)
-    const aAffected = await getChannelAffectedModels(GROUP_A_CHANNELS[0]);
+    const aAffected = await getChannelAffectedModels(
+      GROUP_A_CHANNELS[0],
+      '6000000000000000000000aa'
+    );
     expect(aAffected).toEqual([{ modelId: 'own-a-1', name: 'A Qwen Plus', model: 'qwen-plus' }]);
 
-    const bAffected = await getChannelAffectedModels(GROUP_B_CHANNELS[0]);
+    const bAffected = await getChannelAffectedModels(
+      GROUP_B_CHANNELS[0],
+      '6000000000000000000000aa'
+    );
     expect(bAffected).toEqual([{ modelId: 'own-b-1', name: 'B Qwen Plus', model: 'qwen-plus' }]);
   });
 
   it('getChannelModels returns ALL bucket models matched by upstream name (no only-channel filter)', async () => {
     // gpt-4o is on two system channels → affectedModels is empty, models lists it
-    expect(await getChannelModels(SYSTEM_CHANNELS[0])).toEqual([
+    expect(await getChannelModels(SYSTEM_CHANNELS[0], '6000000000000000000000aa')).toEqual([
       { modelId: 'sys-llm-1', name: 'Sys GPT-4o', model: 'gpt-4o' }
     ]);
-    expect(await getChannelModels(SYSTEM_CHANNELS[1])).toEqual([
+    expect(await getChannelModels(SYSTEM_CHANNELS[1], '6000000000000000000000aa')).toEqual([
       { modelId: 'sys-llm-1', name: 'Sys GPT-4o', model: 'gpt-4o' },
       { modelId: 'sys-llm-2', name: 'Sys Claude', model: 'claude-3-5-sonnet' }
     ]);
     // Owner bucket only counts the owner's models
-    expect(await getChannelModels(GROUP_A_CHANNELS[0])).toEqual([
+    expect(await getChannelModels(GROUP_A_CHANNELS[0], '6000000000000000000000aa')).toEqual([
       { modelId: 'own-a-1', name: 'A Qwen Plus', model: 'qwen-plus' }
     ]);
   });
@@ -296,7 +309,7 @@ describe('channel controller — delete protection / refs', () => {
       tmbId: TMB_A,
       teamId: 'team-a'
     });
-    publishModelHandle(
+    publishSystemModelHandle(
       createModelHandle({
         models: [
           ...testModels.map((m) =>
@@ -320,33 +333,24 @@ describe('channel controller — delete protection / refs', () => {
     expect(systemModels.some((m) => m.id === 'own-a-gpt4o')).toBe(false);
 
     // System channel 101 serves 'gpt-4o'. It should only pair with sys-llm-1, not own-a-gpt4o.
-    const modelsOnSysChannel = await getChannelModels(SYSTEM_CHANNELS[0]);
+    const modelsOnSysChannel = await getChannelModels(
+      SYSTEM_CHANNELS[0],
+      '6000000000000000000000aa'
+    );
     expect(modelsOnSysChannel).toEqual([
       { modelId: 'sys-llm-1', name: 'Sys GPT-4o', model: 'gpt-4o' }
     ]);
 
     // Deleting system channels should not mark own-a-gpt4o as affected
-    const batchAffected = await getBatchChannelsAffectedModels([
-      SYSTEM_CHANNELS[0],
-      SYSTEM_CHANNELS[1]
-    ]);
+    const batchAffected = await getBatchChannelsAffectedModels(
+      [SYSTEM_CHANNELS[0], SYSTEM_CHANNELS[1]],
+      '6000000000000000000000aa'
+    );
     expect(batchAffected.some((m) => m.modelId === 'own-a-gpt4o')).toBe(false);
   });
 });
 
 describe('channel controller — 404 not found detection', () => {
-  it('detects aiproxy 404 / record not found', () => {
-    expect(isAiproxyNotFoundError({ response: { status: 404 } })).toBe(true);
-    expect(isAiproxyNotFoundError(ModelErrEnum.channelNotExist)).toBe(false);
-    expect(
-      isAiproxyNotFoundError({ response: { status: 500, data: { message: 'record not found' } } })
-    ).toBe(true);
-    expect(isAiproxyNotFoundError({ response: { status: 500, data: { message: 'boom' } } })).toBe(
-      false
-    );
-    expect(isAiproxyNotFoundError(new Error('invalid key'))).toBe(false);
-  });
-
   it('system channel list propagates underlying 404 error without translating to domain error', async () => {
     resetChannelCache(); // drop any buckets warmed by earlier tests
     const err404 = { response: { status: 404 } };
@@ -365,7 +369,9 @@ describe('channel controller — 404 not found detection', () => {
   it('member channel list tolerates 404 for uninitialized group and returns empty list', async () => {
     resetChannelCache();
     axiosMock.mockRejectedValue({ response: { status: 404 } });
-    await expect(getMemberChannelList({ tmbId: 'new-tmb' })).resolves.toEqual({
+    await expect(
+      getMemberChannelList({ teamId: '6000000000000000000000aa', tmbId: 'new-tmb' })
+    ).resolves.toEqual({
       list: [],
       total: 0
     });
@@ -388,7 +394,10 @@ describe('channel controller — list views with relatedModelCount', () => {
   });
 
   it('member channel view counts the owner bucket', async () => {
-    const { list, total } = await getMemberChannelList({ tmbId: TMB_A });
+    const { list, total } = await getMemberChannelList({
+      teamId: '6000000000000000000000aa',
+      tmbId: TMB_A
+    });
     expect(total).toBe(2);
     expect(list.find((c) => c.id === 201)?.relatedModelCount).toBe(1);
     expect(list.find((c) => c.id === 202)?.relatedModelCount).toBe(1);
@@ -408,7 +417,10 @@ describe('channel controller — list views with relatedModelCount', () => {
 
     axiosMock.mockClear();
     axiosMock.mockResolvedValue(okEnvelope({ channels: null, total: 1 }));
-    const member = await getMemberChannelList({ tmbId: 'tmb-a' });
+    const member = await getMemberChannelList({
+      teamId: '6000000000000000000000aa',
+      tmbId: 'tmb-a'
+    });
     expect(member.total).toBe(0);
     expect(member.list).toEqual([]);
   });

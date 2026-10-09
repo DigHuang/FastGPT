@@ -1,6 +1,6 @@
 import type { ApiRequestProps } from '@fastgpt/next/type';
 import { NextAPI } from '@/service/middleware/entry';
-import { authModelScopeOperation } from '@fastgpt/service/support/permission/model/controller';
+import { authModelScopeOperation } from '@fastgpt/service/support/permission/model/auth';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
 import { SystemModelDocumentDataSchema } from '@fastgpt/global/core/ai/model/schema';
 import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';

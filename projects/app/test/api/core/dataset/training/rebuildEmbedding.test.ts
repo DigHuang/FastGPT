@@ -12,7 +12,7 @@ import {
 import { DatasetDataIndexTypeEnum } from '@fastgpt/global/core/dataset/data/constants';
 import { getRootUser } from '@test/datas/users';
 import { Call } from '@test/utils/request';
-import { getModelHandle } from '@fastgpt/service/core/ai/model';
+import { getSystemModelHandle } from '@fastgpt/service/core/ai/model/index';
 vi.unmock('@fastgpt/service/core/ai/model');
 import type {
   EmbeddingSystemModelDataType,
@@ -118,9 +118,11 @@ describe('POST /api/core/dataset/training/rebuildEmbedding', () => {
     });
 
     expect(
-      (await getModelHandle()).getEmbeddingModelData({ modelId: visionEmbeddingModel.modelId })
+      (await getSystemModelHandle()).getEmbeddingModelData({
+        modelId: visionEmbeddingModel.modelId
+      })
     ).toEqual(visionEmbeddingModel);
-    expect((await getModelHandle()).getLLMModelData({ modelId: agentModel.modelId })).toEqual(
+    expect((await getSystemModelHandle()).getLLMModelData({ modelId: agentModel.modelId })).toEqual(
       agentModel
     );
 
@@ -201,9 +203,9 @@ describe('POST /api/core/dataset/training/rebuildEmbedding', () => {
       imageId: 'dataset/team/main.png'
     });
 
-    expect((await getModelHandle()).getVlmModelData({ modelId: datasetVlmModel.modelId })).toEqual(
-      datasetVlmModel
-    );
+    expect(
+      (await getSystemModelHandle()).getVlmModelData({ modelId: datasetVlmModel.modelId })
+    ).toEqual(datasetVlmModel);
 
     const res = await Call(handler, {
       auth: root,

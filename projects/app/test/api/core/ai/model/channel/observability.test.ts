@@ -5,7 +5,7 @@ import {
   getChannelDashboard,
   getChannelLogDetail,
   searchChannelLogs
-} from '@fastgpt/service/core/ai/channel/observability';
+} from '@fastgpt/service/core/ai/model/channel/observability';
 import type { AiproxyGroupChannel } from '@fastgpt/service/thirdProvider/aiproxy/type';
 import { Call } from '@test/utils/request';
 import logsHandler from '@/pages/api/core/ai/model/channel/logs';
@@ -44,9 +44,9 @@ vi.mock('@fastgpt/service/thirdProvider/aiproxy/client', async (importOriginal) 
   };
 });
 
-vi.mock('@fastgpt/service/core/ai/channel/observability', async (importOriginal) => {
+vi.mock('@fastgpt/service/core/ai/model/channel/observability', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@fastgpt/service/core/ai/channel/observability')>();
+    await importOriginal<typeof import('@fastgpt/service/core/ai/model/channel/observability')>();
   return {
     ...actual,
     searchChannelLogs: vi.fn(),

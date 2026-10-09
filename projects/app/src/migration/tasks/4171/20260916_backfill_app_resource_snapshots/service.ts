@@ -23,7 +23,7 @@ import { MongoOutLink } from '@fastgpt/service/support/outLink/schema';
 import { MongoChatInputGuide } from '@fastgpt/service/core/chat/inputGuide/schema';
 import { MongoAppChatLog } from '@fastgpt/service/core/app/logs/chatLogsSchema';
 import { filterAuthorizedAppResources } from '@fastgpt/service/support/permission/app/resource';
-import { getModelHandle } from '@fastgpt/service/core/ai/model';
+import { getSystemModelHandle } from '@fastgpt/service/core/ai/model/index';
 import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { parseLegacyMcpChildApps } from '@fastgpt/service/core/app/mcp';
 import { getMCPToolSetRuntimeNode } from '@fastgpt/global/core/app/tool/mcpTool/utils';
@@ -311,7 +311,7 @@ export const backfillAppVersionResourceRecords = async (
 
   if (recordsToProcess.length === 0) return result;
 
-  const models = (await getModelHandle()).getAllModels();
+  const models = (await getSystemModelHandle()).getAllModels();
 
   const appIds = recordsToProcess.map((record) => record.appId).filter(Boolean);
   const apps =
@@ -505,7 +505,7 @@ const createMissingPublishedVersion = async (
   record: AppResourceMigrationRecord,
   models?: readonly SystemModelDataType[]
 ) => {
-  const loadedModels = models ?? (await getModelHandle()).getAllModels();
+  const loadedModels = models ?? (await getSystemModelHandle()).getAllModels();
   return mongoSessionRun(async (session) => {
     const currentApp = (await MongoApp.collection.findOne(
       { _id: record._id as never },
@@ -650,7 +650,7 @@ export const backfillAppResourceRecords = async (
   if (actionableRecords.length === 0) return result;
 
   const models = actionableRecords.some((item) => item.action === 'create_version')
-    ? (await getModelHandle()).getAllModels()
+    ? (await getSystemModelHandle()).getAllModels()
     : [];
 
   const processResults = await runWithConcurrency({

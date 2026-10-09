@@ -42,23 +42,20 @@ vi.mock('@fastgpt/service/thirdProvider/aiproxy/client', () => ({
   }
 }));
 
-vi.mock('@fastgpt/service/core/ai/channel/association', () => ({
+vi.mock('@fastgpt/service/core/ai/model/channel/association', () => ({
   getChannelAffectedModels: mocks.getChannelAffectedModels,
   getBatchChannelsAffectedModels: mocks.getBatchChannelsAffectedModels
 }));
 
 import {
-  appendModelToChannels,
-  batchOperateChannels,
   createChannel,
-  deleteChannel,
-  removeModelsFromChannels,
-  syncModelNameInChannels,
   updateChannel,
   updateChannelStatus,
-  updateModelChannelBindings
-} from '@fastgpt/service/core/ai/channel/service';
+  batchOperateChannels,
+  deleteChannel
+} from '@fastgpt/service/core/ai/model/channel/service';
 
+const TEAM_ID = '60000000000000000000000b';
 const TMB_ID = '60000000000000000000000a';
 const GROUP_ID = `fastgpt:tmb:${TMB_ID}`;
 
@@ -76,283 +73,11 @@ const makeChannel = (id: number, overrides: Record<string, unknown> = {}) => ({
 
 const notFound = () => Promise.reject({ response: { status: 404 } });
 
-describe('channel model binding service', () => {
+describe('channel service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.group.list.mockResolvedValue({ channels: [], total: 0 });
     mocks.system.list.mockResolvedValue({ channels: [], total: 0 });
-  });
-
-  describe('updateModelChannelBindings', () => {
-    it('appends the model and sends only models and model_mapping patch', async () => {
-      mocks.group.get.mockResolvedValue(
-        makeChannel(1, {
-          models: ['other'],
-          model_mapping: { other: 'up-other' },
-          sets: ['default']
-        })
-      );
-
-      await updateModelChannelBindings({
-        model: ' model-a ',
-        addChannelIds: [1],
-        channelType: 'team',
-        tmbId: TMB_ID
-      });
-
-      expect(mocks.groupFactory).toHaveBeenCalledWith(GROUP_ID);
-      expect(mocks.group.update).toHaveBeenCalledWith(1, {
-        models: ['other', 'model-a'],
-        model_mapping: { other: 'up-other' }
-      });
-    });
-
-    it('is idempotent when the model is already bound or not bound', async () => {
-      mocks.group.get.mockImplementation((id: number) =>
-        Promise.resolve(makeChannel(id, { models: id === 1 ? ['model-a'] : ['other'] }))
-      );
-
-      await updateModelChannelBindings({
-        model: 'model-a',
-        addChannelIds: [1],
-        removeChannelIds: [2],
-        channelType: 'team',
-        tmbId: TMB_ID
-      });
-
-      expect(mocks.group.update).not.toHaveBeenCalled();
-    });
-
-    it('removes the model and its mapping entry while keeping other models', async () => {
-      mocks.group.get.mockResolvedValue(
-        makeChannel(3, {
-          models: ['model-a', 'model-b'],
-          model_mapping: { 'model-a': 'up-a', 'model-b': 'up-b' }
-        })
-      );
-
-      await updateModelChannelBindings({
-        model: 'model-a',
-        removeChannelIds: [3],
-        channelType: 'team',
-        tmbId: TMB_ID
-      });
-
-      expect(mocks.group.update).toHaveBeenCalledWith(3, {
-        models: ['model-b'],
-        model_mapping: { 'model-b': 'up-b' }
-      });
-    });
-
-    it('drops an emptied model_mapping instead of sending an empty object', async () => {
-      mocks.group.get.mockResolvedValue(
-        makeChannel(4, { models: ['model-a'], model_mapping: { 'model-a': 'up-a' } })
-      );
-
-      await updateModelChannelBindings({
-        model: 'model-a',
-        removeChannelIds: [4],
-        channelType: 'team',
-        tmbId: TMB_ID
-      });
-
-      const [, payload] = mocks.group.update.mock.calls[0];
-      expect(payload.models).toEqual([]);
-      expect(payload.model_mapping).toBeUndefined();
-    });
-
-    it('routes system scope to system channels and never to a member group', async () => {
-      mocks.system.get.mockResolvedValue({ ...makeChannel(5), group_id: undefined });
-
-      await updateModelChannelBindings({
-        model: 'model-a',
-        addChannelIds: [5],
-        channelType: 'system',
-        tmbId: TMB_ID
-      });
-
-      expect(mocks.groupFactory).not.toHaveBeenCalled();
-      expect(mocks.system.update).toHaveBeenCalledWith(
-        5,
-        expect.objectContaining({ models: ['model-a'] })
-      );
-    });
-
-    it('rejects a channel that is not in the caller bucket and writes nothing', async () => {
-      mocks.group.get.mockImplementation(notFound);
-
-      await expect(
-        updateModelChannelBindings({
-          model: 'model-a',
-          addChannelIds: [99],
-          channelType: 'team',
-          tmbId: TMB_ID
-        })
-      ).rejects.toBe(ModelErrEnum.channelNotExist);
-      expect(mocks.group.update).not.toHaveBeenCalled();
-    });
-
-    it('rejects a blank model name before touching AI Proxy', async () => {
-      await expect(
-        updateModelChannelBindings({
-          model: '   ',
-          addChannelIds: [1],
-          channelType: 'team',
-          tmbId: TMB_ID
-        })
-      ).rejects.toBe(ModelErrEnum.invalidModelConfig);
-      expect(mocks.group.get).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('removeModelsFromChannels', () => {
-    it('cleans only channels that reference the deleted models', async () => {
-      mocks.group.listAll.mockResolvedValue([
-        makeChannel(1, { models: ['m1', 'm2'], model_mapping: { m1: 'u1', m2: 'u2' } }),
-        makeChannel(2, { models: ['m2'] }),
-        makeChannel(3, { models: ['m1'] })
-      ]);
-
-      await removeModelsFromChannels({ models: ['m1'], channelType: 'team', tmbId: TMB_ID });
-
-      expect(mocks.group.update).toHaveBeenCalledTimes(2);
-      expect(mocks.group.update).toHaveBeenCalledWith(1, {
-        models: ['m2'],
-        model_mapping: { m2: 'u2' }
-      });
-      expect(mocks.group.update).toHaveBeenCalledWith(3, {
-        models: []
-      });
-    });
-
-    it('also cleans a stale model_mapping entry that is no longer in models', async () => {
-      mocks.group.listAll.mockResolvedValue([
-        makeChannel(1, { models: ['m2'], model_mapping: { m1: 'u1', m2: 'u2' } })
-      ]);
-
-      await removeModelsFromChannels({ models: ['m1'], channelType: 'team', tmbId: TMB_ID });
-
-      expect(mocks.group.update).toHaveBeenCalledWith(
-        1,
-        expect.objectContaining({ models: ['m2'], model_mapping: { m2: 'u2' } })
-      );
-    });
-
-    it('treats a missing AI Proxy bucket as nothing to clean', async () => {
-      mocks.group.listAll.mockImplementation(notFound);
-
-      await expect(
-        removeModelsFromChannels({ models: ['m1'], channelType: 'team', tmbId: TMB_ID })
-      ).resolves.toBeUndefined();
-      expect(mocks.group.update).not.toHaveBeenCalled();
-    });
-
-    it('propagates real AI Proxy failures so the caller can log them', async () => {
-      mocks.group.listAll.mockRejectedValue(new Error('aiproxy down'));
-
-      await expect(
-        removeModelsFromChannels({ models: ['m1'], channelType: 'team', tmbId: TMB_ID })
-      ).rejects.toThrow('aiproxy down');
-    });
-
-    it('skips AI Proxy entirely when there is no model name to clean', async () => {
-      await removeModelsFromChannels({ models: ['', '  '], channelType: 'team', tmbId: TMB_ID });
-
-      expect(mocks.group.listAll).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('syncModelNameInChannels', () => {
-    it('renames a team model in channel models and model mappings', async () => {
-      mocks.group.listAll.mockResolvedValue([
-        makeChannel(1, {
-          models: ['old-model', 'keep-model'],
-          model_mapping: { 'old-model': 'upstream-model', 'keep-model': 'upstream-keep' }
-        }),
-        makeChannel(2, { models: ['keep-model'] })
-      ]);
-
-      await syncModelNameInChannels({
-        oldModel: 'old-model',
-        newModel: 'new-model',
-        channelType: 'team',
-        tmbId: TMB_ID
-      });
-
-      expect(mocks.groupFactory).toHaveBeenCalledWith(GROUP_ID);
-      expect(mocks.group.update).toHaveBeenCalledOnce();
-      expect(mocks.group.update).toHaveBeenCalledWith(1, {
-        models: ['new-model', 'keep-model'],
-        model_mapping: { 'keep-model': 'upstream-keep', 'new-model': 'upstream-model' }
-      });
-    });
-
-    it('uses system channels for system models', async () => {
-      mocks.system.listAll.mockResolvedValue([
-        { ...makeChannel(3, { models: ['old-model'] }), group_id: undefined }
-      ]);
-
-      await syncModelNameInChannels({
-        oldModel: 'old-model',
-        newModel: 'new-model',
-        channelType: 'system',
-        tmbId: ''
-      });
-
-      expect(mocks.groupFactory).not.toHaveBeenCalled();
-      expect(mocks.system.update).toHaveBeenCalledWith(3, { models: ['new-model'] });
-    });
-
-    it('rolls back channels already updated when a later rename fails', async () => {
-      mocks.group.listAll.mockResolvedValue([
-        makeChannel(1, { models: ['old-model'] }),
-        makeChannel(2, { models: ['old-model'] })
-      ]);
-      mocks.group.update
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('second channel failed'))
-        .mockResolvedValueOnce(undefined);
-
-      await expect(
-        syncModelNameInChannels({
-          oldModel: 'old-model',
-          newModel: 'new-model',
-          channelType: 'team',
-          tmbId: TMB_ID
-        })
-      ).rejects.toThrow('second channel failed');
-
-      expect(mocks.group.update).toHaveBeenNthCalledWith(1, 1, { models: ['new-model'] });
-      expect(mocks.group.update).toHaveBeenNthCalledWith(2, 2, { models: ['new-model'] });
-      expect(mocks.group.update).toHaveBeenNthCalledWith(3, 1, { models: ['old-model'] });
-    });
-  });
-
-  describe('appendModelToChannels', () => {
-    it('swallows binding failures because the model itself is already created', async () => {
-      mocks.group.get.mockImplementation(notFound);
-
-      await expect(
-        appendModelToChannels({
-          channelIds: [1],
-          model: 'model-a',
-          channelType: 'team',
-          tmbId: TMB_ID
-        })
-      ).resolves.toBeUndefined();
-      expect(mocks.group.update).not.toHaveBeenCalled();
-    });
-
-    it('does nothing when no channel is selected', async () => {
-      await appendModelToChannels({
-        channelIds: [],
-        model: 'model-a',
-        channelType: 'team',
-        tmbId: TMB_ID
-      });
-
-      expect(mocks.group.get).not.toHaveBeenCalled();
-    });
   });
 
   describe('createChannel', () => {
@@ -578,7 +303,7 @@ describe('channel model binding service', () => {
       await expect(
         updateChannelStatus({
           id: 99,
-          status: 0,
+          status: 2,
           channelType: 'team',
           tmbId: TMB_ID
         })
@@ -595,13 +320,15 @@ describe('channel model binding service', () => {
       mocks.getChannelAffectedModels.mockResolvedValue(affected);
 
       const res = await deleteChannel({
+        teamId: TEAM_ID,
         id: 1,
         channelType: 'team',
         tmbId: TMB_ID
       });
 
       expect(mocks.getChannelAffectedModels).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 1 })
+        expect.objectContaining({ id: 1 }),
+        TEAM_ID
       );
       expect(mocks.group.delete).toHaveBeenCalledWith(1);
       expect(res).toEqual({ affectedModels: affected });
@@ -612,6 +339,7 @@ describe('channel model binding service', () => {
       mocks.getChannelAffectedModels.mockResolvedValue([]);
 
       const res = await deleteChannel({
+        teamId: TEAM_ID,
         id: 2,
         channelType: 'system',
         tmbId: ''
@@ -626,6 +354,7 @@ describe('channel model binding service', () => {
 
       await expect(
         deleteChannel({
+          teamId: TEAM_ID,
           id: 99,
           channelType: 'team',
           tmbId: TMB_ID
@@ -643,11 +372,15 @@ describe('channel model binding service', () => {
       mocks.getBatchChannelsAffectedModels.mockResolvedValue(affected);
 
       const res = await batchOperateChannels({
+        teamId: TEAM_ID,
         body: { ids: [1, 2], action: 'delete', channelType: 'team' },
         tmbId: TMB_ID
       });
 
-      expect(mocks.getBatchChannelsAffectedModels).toHaveBeenCalled();
+      expect(mocks.getBatchChannelsAffectedModels).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: 1 }), expect.objectContaining({ id: 2 })],
+        TEAM_ID
+      );
       expect(mocks.group.batchDelete).toHaveBeenCalledWith([1, 2]);
       expect(res).toEqual({ affectedModels: affected });
     });
@@ -659,6 +392,7 @@ describe('channel model binding service', () => {
       mocks.getBatchChannelsAffectedModels.mockResolvedValue([]);
 
       const res = await batchOperateChannels({
+        teamId: TEAM_ID,
         body: { ids: [3, 4], action: 'delete', channelType: 'system' },
         tmbId: ''
       });
@@ -671,11 +405,13 @@ describe('channel model binding service', () => {
       mocks.group.get.mockImplementation((id: number) => Promise.resolve(makeChannel(id)));
 
       const res = await batchOperateChannels({
+        teamId: TEAM_ID,
         body: { ids: [1, 2], action: 'status', status: 0, channelType: 'team' },
         tmbId: TMB_ID
       });
 
       expect(mocks.group.batchUpdateStatus).toHaveBeenCalledWith([1, 2], 0);
+      expect(mocks.getBatchChannelsAffectedModels).not.toHaveBeenCalled();
       expect(res).toEqual({});
     });
 
@@ -685,11 +421,13 @@ describe('channel model binding service', () => {
       );
 
       const res = await batchOperateChannels({
+        teamId: TEAM_ID,
         body: { ids: [3, 4], action: 'status', status: 1, channelType: 'system' },
         tmbId: ''
       });
 
       expect(mocks.system.batchUpdateStatus).toHaveBeenCalledWith([3, 4], 1);
+      expect(mocks.getBatchChannelsAffectedModels).not.toHaveBeenCalled();
       expect(res).toEqual({});
     });
 
@@ -700,6 +438,7 @@ describe('channel model binding service', () => {
 
       await expect(
         batchOperateChannels({
+          teamId: TEAM_ID,
           body: { ids: [1, 2], action: 'delete', channelType: 'team' },
           tmbId: TMB_ID
         })
