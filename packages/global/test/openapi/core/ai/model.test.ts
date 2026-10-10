@@ -110,6 +110,13 @@ describe('admin system model API schemas', () => {
         channelType: 'system'
       }).templates
     ).toHaveLength(500);
+    expect(
+      CreateModelsFromTemplatesBodySchema.parse({
+        templates: [{ type: 'llm', model: 'gpt-4o' }],
+        channelType: 'system',
+        channelIds: [1, 2]
+      }).channelIds
+    ).toEqual([1, 2]);
     expect(() =>
       CreateModelsFromTemplatesBodySchema.parse({ templates, channelType: 'system' })
     ).toThrow();

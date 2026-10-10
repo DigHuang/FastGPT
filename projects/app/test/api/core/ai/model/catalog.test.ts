@@ -143,6 +143,7 @@ describe('GET /api/core/ai/model/catalog', () => {
     expect(mocks.getMemberModelCatalogPermission).toHaveBeenCalledWith({
       teamId: 'outlink-team',
       tmbId: 'outlink-member',
+      hasManagePer: false,
       catalogSnapshot: {
         models: getCachedSystemModelHandle()?.getActiveModels(),
         version: getCachedSystemModelHandle()?.version
@@ -215,5 +216,28 @@ describe('GET /api/core/ai/model/catalog', () => {
     });
     const result = await handler({ query: {} } as any);
     expect(result.data?.models.map((m) => m.modelId)).toEqual([model.modelId]);
+  });
+
+  it('forwards hasManagePer to getMemberModelCatalogPermission', async () => {
+    mocks.authUserPer.mockResolvedValueOnce({
+      teamId: 'admin-team',
+      tmbId: 'admin-tmb',
+      isRoot: true,
+      permission: { hasManagePer: true }
+    });
+    mocks.getMemberModelCatalogPermission.mockResolvedValueOnce({
+      modelIds: [model.modelId],
+      version: 'admin-perm-version'
+    });
+
+    await handler({ query: {} } as any);
+
+    expect(mocks.getMemberModelCatalogPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: 'admin-team',
+        tmbId: 'admin-tmb',
+        hasManagePer: true
+      })
+    );
   });
 });

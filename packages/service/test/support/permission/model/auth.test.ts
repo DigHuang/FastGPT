@@ -111,6 +111,31 @@ describe('model management guards', () => {
       rootSpy.mockRestore();
     });
 
+    it('rejects team scope when enable_team_model is false for members and root', async () => {
+      global.feConfigs = { isPlus: true, enable_team_model: false } as typeof global.feConfigs;
+      const memberSpy = await mockAuth({
+        tmbId: 'tmb-1',
+        teamId: 'team-1',
+        isRoot: false,
+        tmb: { permission: { hasModelCreatePer: true } }
+      });
+      await expect(authModelManage({ req: {}, channelType: 'team' })).rejects.toBe(
+        ModelErrEnum.teamModelDisabled
+      );
+      memberSpy.mockRestore();
+
+      const rootSpy = await mockAuth({
+        tmbId: 'tmb-root',
+        teamId: 'team-1',
+        isRoot: true,
+        tmb: { permission: {} }
+      });
+      await expect(authModelManage({ req: {}, channelType: 'team' })).rejects.toBe(
+        ModelErrEnum.teamModelDisabled
+      );
+      rootSpy.mockRestore();
+    });
+
     it('rejects a member without hasModelCreatePer on team scope', async () => {
       const spy = await mockAuth({
         tmbId: 'tmb-1',

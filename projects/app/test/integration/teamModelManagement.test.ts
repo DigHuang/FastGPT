@@ -319,6 +319,28 @@ describe('team model management integration: permission, member isolation and AI
       });
     });
 
+    it('associates channels when batch creating models from templates', async () => {
+      const { installer } = await createMembers();
+      external.listModels.mockResolvedValue([modelDraft('tpl-a'), modelDraft('tpl-b')]);
+      const groupId = `fastgpt:tmb:${installer.tmbId}`;
+      const channel = addChannel(groupId, { id: 101, name: 'ch-template', models: ['existing'] });
+
+      const created = await Call(createFromTemplatesHandler, {
+        auth: installer,
+        body: {
+          templates: [
+            { type: ModelTypeEnum.llm, model: 'tpl-a' },
+            { type: ModelTypeEnum.llm, model: 'tpl-b' }
+          ],
+          channelType: 'team',
+          channelIds: [channel.id]
+        }
+      });
+      expect(created.code).toBe(200);
+      expect(created.data.models).toHaveLength(2);
+      expect(channel.models).toEqual(['existing', 'tpl-a', 'tpl-b']);
+    });
+
     it('does not let a member without the permission read the system templates', async () => {
       const { plain } = await createMembers();
       external.listModels.mockResolvedValue([modelDraft('tpl-secret')]);

@@ -2,7 +2,7 @@ import { useModelChannelTest } from './useModelChannelTest';
 import type { ModelChannelSummary } from '@fastgpt/global/openapi/core/ai/model/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { getModelTemplates, postModelsFromTemplates } from '@/web/core/ai/model/api';
-import { defaultChannel } from '@fastgpt/global/core/ai/model/channel';
+import { defaultChannel, type ChannelInfoType } from '@fastgpt/global/core/ai/model/channel';
 import {
   Box,
   Button,
@@ -240,6 +240,63 @@ const ModelTypeSelector = ({
 };
 
 /**
+ * 统一管理模型新建流程中的渠道选择与新建渠道自动勾选。
+ *
+ * 【职责与行为】
+ * 1. 维护当前选中的渠道集合（内部统一以 Set<number> 维护，避免重复并保持与 ModelLinkedChannels 一致）。
+ * 2. 对外同时暴露 Set 与 Array 格式的读写接口，抹平 ModelLinkedChannels 与 ModelChannelSelector 的格式差异。
+ * 3. 当通过 EditChannelModal 新建渠道时，通过传入的 channelId 或新创建的 channelName，在外部 channels 刷新后
+ *    自动将其追加至当前选中集合中，实现与模型编辑弹窗一致的新建自动勾选体验。
+ * 4. 依赖外部由 useModelConfig 提供的 onRefresh 进行父级渠道列表刷新，杜绝在子组件内重复并发请求 getModelConfig。
+ */
+const useChannelAutoSelect = ({
+  channels,
+  onRefresh
+}: {
+  channels: ModelChannelSummary[];
+  onRefresh?: () => unknown | Promise<unknown>;
+}) => {
+  const [selectedChannelIds, setSelectedChannelIds] = useState<Set<number>>(new Set());
+  const pendingChannelNameRef = useRef<string | null>(null);
+
+  // 当外部 channels 刷新后，匹配刚创建成功的渠道并自动追加至选中集合
+  useEffect(() => {
+    if (!pendingChannelNameRef.current) return;
+    const targetName = pendingChannelNameRef.current;
+    const createdChannel = channels.find((c) => c.name.trim() === targetName);
+    if (createdChannel) {
+      setSelectedChannelIds((prev) => new Set([...prev, createdChannel.id]));
+      pendingChannelNameRef.current = null;
+    }
+  }, [channels]);
+
+  const onChannelCreated = useCallback(
+    async (createdData?: ChannelInfoType) => {
+      const trimmedName = createdData?.name?.trim();
+      if (trimmedName) {
+        pendingChannelNameRef.current = trimmedName;
+      }
+      await Promise.resolve(onRefresh?.());
+    },
+    [onRefresh]
+  );
+
+  const selectedChannelIdList = useMemo(() => [...selectedChannelIds], [selectedChannelIds]);
+
+  const setSelectedChannelIdList = useCallback((ids: number[]) => {
+    setSelectedChannelIds(new Set(ids));
+  }, []);
+
+  return {
+    selectedChannelIds,
+    setSelectedChannelIds,
+    selectedChannelIdList,
+    setSelectedChannelIdList,
+    onChannelCreated
+  };
+};
+
+/**
  * 空白新建模型的两步控制器。
  *
  * 类型选择和参数表单共享同一个 Modal，创建状态只包含持久化字段，不持有或发送 modelId。
@@ -250,6 +307,7 @@ const BlankModelCreateModal = ({
   providers,
   channels,
   channelType,
+  onRefreshChannels,
   onSuccess,
   onClose
 }: {
@@ -258,6 +316,7 @@ const BlankModelCreateModal = ({
   providers: ModelProviderItemType[];
   channels: ModelChannelSummary[];
   channelType: ChannelType;
+  onRefreshChannels?: () => unknown | Promise<unknown>;
   onSuccess: () => unknown | Promise<unknown>;
   onClose: () => void;
 }) => {
@@ -268,7 +327,10 @@ const BlankModelCreateModal = ({
     defaultModelData?.type ?? ModelTypeEnum.llm
   );
   const [submitting, setSubmitting] = useState(false);
-  const [selectedChannelIds, setSelectedChannelIds] = useState<Set<number>>(new Set());
+  const { selectedChannelIds, setSelectedChannelIds, onChannelCreated } = useChannelAutoSelect({
+    channels,
+    onRefresh: onRefreshChannels ?? onSuccess
+  });
   const [showAssociateChannel, setShowAssociateChannel] = useState(false);
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [draftModel, setDraftModel] = useState(defaultModelData?.model ?? '');
@@ -279,6 +341,9 @@ const BlankModelCreateModal = ({
     [defaultModelData, createModelData, selectedType]
   );
   const { openConfirm: openLeaveConfirm, ConfirmModal: LeaveConfirmModal } = useConfirm();
+
+  const currentDraftModel = draftModel.trim() || modelData.model.trim();
+  const currentProviderAvatar = providers.find((p) => p.id === modelData.provider)?.avatar;
 
   const { testingChannelIds, testModelChannel: handleTestModelChannel } = useModelChannelTest({
     target: { source: 'draft', getModelData: () => modelFormGetValuesRef.current?.() },
@@ -434,18 +499,17 @@ const BlankModelCreateModal = ({
 
       {showCreateChannel && (
         <EditChannelModal
-          defaultConfig={{ ...defaultChannel, models: [] }}
+          defaultConfig={{
+            ...defaultChannel,
+            models: []
+          }}
           fixedModel={{
-            model: draftModel.trim() || t('config_model:model_pending_creation')
+            model: currentDraftModel || t('config_model:model_pending_creation'),
+            avatar: currentProviderAvatar
           }}
           channelType={channelType}
-          allowEmptyModels
-          onSuccess={async (createdChannelId) => {
-            if (createdChannelId !== undefined) {
-              setSelectedChannelIds((current) => new Set([...current, createdChannelId]));
-            }
-            onSuccess();
-          }}
+          allowEmptyModels={true}
+          onSuccess={onChannelCreated}
           onClose={() => setShowCreateChannel(false)}
         />
       )}
@@ -478,7 +542,11 @@ const TemplateCreateModal = ({
   const [providerFilter, setProviderFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState<ModelTypeEnum | ''>('');
   const [templateSearch, setTemplateSearch] = useState('');
-  const [selectedChannelIds, setSelectedChannelIds] = useState<number[]>([]);
+  const { selectedChannelIdList, setSelectedChannelIdList, onChannelCreated } =
+    useChannelAutoSelect({
+      channels,
+      onRefresh: onRefresh ?? onSuccess
+    });
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const {
     data,
@@ -564,7 +632,8 @@ const TemplateCreateModal = ({
     () =>
       postModelsFromTemplates({
         templates: selectedTemplates.map(({ type, model }) => ({ type, model })),
-        channelType
+        channelType,
+        channelIds: selectedChannelIdList
       }),
     {
       onSuccess: () => {
@@ -820,8 +889,8 @@ const TemplateCreateModal = ({
           }))}
           channels={channels}
           channelType={channelType}
-          selectedChannelIds={selectedChannelIds}
-          onChange={setSelectedChannelIds}
+          selectedChannelIds={selectedChannelIdList}
+          onChange={setSelectedChannelIdList}
           showCurrentModel={false}
           showSelectedModelCount
           showTest={false}
@@ -831,21 +900,17 @@ const TemplateCreateModal = ({
 
       {showCreateChannel && (
         <EditChannelModal
-          defaultConfig={{ ...defaultChannel, models: [] }}
+          defaultConfig={{
+            ...defaultChannel,
+            models: selectedTemplates.map((model) => model.model)
+          }}
           fixedModels={selectedTemplates.map((model) => ({
             model: model.model,
             avatar: providerMap.get(model.provider)?.avatar
           }))}
           channelType={channelType}
-          allowEmptyModels
-          onSuccess={async (createdChannelId) => {
-            if (createdChannelId !== undefined) {
-              setSelectedChannelIds((current) =>
-                current.includes(createdChannelId) ? current : [...current, createdChannelId]
-              );
-            }
-            onRefresh?.();
-          }}
+          allowEmptyModels={selectedTemplates.length === 0}
+          onSuccess={onChannelCreated}
           onClose={() => setShowCreateChannel(false)}
         />
       )}
@@ -895,6 +960,7 @@ const AddModel = ({
           channels={channels}
           channelType={channelType}
           onClose={() => setShowBlankCreate(false)}
+          onRefreshChannels={onSuccess}
           onSuccess={onSuccess}
         />
       )}
@@ -906,10 +972,8 @@ const AddModel = ({
           channels={channels}
           channelType={channelType}
           onClose={() => setTemplateForConfig(null)}
-          onSuccess={async () => {
-            setTemplateForConfig(null);
-            await onSuccess();
-          }}
+          onRefreshChannels={onSuccess}
+          onSuccess={onSuccess}
         />
       )}
       {showTemplateCreate && (

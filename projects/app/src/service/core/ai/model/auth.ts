@@ -16,13 +16,17 @@ export const authModelViewer = async ({
     const { outLinkConfig } = await authOutLink({ ...outLinkAuthData, req });
     const teamId = String(outLinkConfig.teamId);
     const tmbId = String(outLinkConfig.tmbId);
-    return { teamId, tmbId };
+    return { teamId, tmbId, hasManagePer: false };
   }
-  const { teamId, tmbId } = await authUserPer({
+  const { teamId, tmbId, isRoot, permission } = await authUserPer({
     req,
     authToken: true,
     authApiKey: true,
     per: ReadPermissionVal
   });
-  return { teamId, tmbId };
+  return {
+    teamId,
+    tmbId,
+    hasManagePer: Boolean(isRoot || permission?.hasManagePer)
+  };
 };

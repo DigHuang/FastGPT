@@ -87,7 +87,13 @@ const ModelEditModal = ({
             formId={formId}
             channelType={channelType}
             modelData={(() => {
-              const { modelId: _modelId, avatar: _avatar, ...documentData } = detail.model;
+              const {
+                modelId: _modelId,
+                avatar: _avatar,
+                tmbId: _tmbId,
+                teamId: _teamId,
+                ...documentData
+              } = detail.model;
               return documentData;
             })()}
             providers={providers}

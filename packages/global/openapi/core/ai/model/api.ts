@@ -312,7 +312,6 @@ export const TestDraftModelBodySchema = z
     }),
     channelType: ModelChannelTypeSchema
   })
-  .strict()
   .superRefine(({ modelData }, ctx) => {
     if (modelData.type === ModelTypeEnum.tts && modelData.config.voices.length === 0) {
       ctx.addIssue({
@@ -352,34 +351,30 @@ export const GetModelTemplatesResponseSchema = z.object({
 export type GetModelTemplatesResponse = z.infer<typeof GetModelTemplatesResponseSchema>;
 
 /* POST /api/core/ai/model/updateChannels */
-export const UpdateModelChannelsBodySchema = z
-  .object({
-    modelId: ModelIdSchema,
-    channelType: ChannelTypeSchema.meta({
-      description: '模型作用域；必填，服务端据此先鉴权再查询模型，避免无权限成员探测模型是否存在'
-    }),
-    addChannelIds: z.array(IntSchema.positive()).max(500).optional().meta({
-      description: '需要关联到该模型的渠道 ID，已关联的渠道会被忽略'
-    }),
-    removeChannelIds: z.array(IntSchema.positive()).max(500).optional().meta({
-      description: '需要解除与该模型关联的渠道 ID，同时清理渠道内该模型的映射；渠道本身不删除'
-    })
+export const UpdateModelChannelsBodySchema = z.object({
+  modelId: ModelIdSchema,
+  channelType: ChannelTypeSchema.meta({
+    description: '模型作用域；必填，服务端据此先鉴权再查询模型，避免无权限成员探测模型是否存在'
+  }),
+  addChannelIds: z.array(IntSchema.positive()).max(500).optional().meta({
+    description: '需要关联到该模型的渠道 ID，已关联的渠道会被忽略'
+  }),
+  removeChannelIds: z.array(IntSchema.positive()).max(500).optional().meta({
+    description: '需要解除与该模型关联的渠道 ID，同时清理渠道内该模型的映射；渠道本身不删除'
   })
-  .strict();
+});
 export type UpdateModelChannelsBody = z.infer<typeof UpdateModelChannelsBodySchema>;
 
 /* POST /api/core/ai/model/create */
-export const CreateModelBodySchema = z
-  .object({
-    modelData: SystemModelDocumentDataSchema.meta({
-      description: '完整模型配置；未声明字段会被忽略，modelId 始终由服务端生成'
-    }),
-    channelType: ModelChannelTypeSchema,
-    channelIds: z.array(IntSchema.positive()).optional().meta({
-      description: '可选：创建模型后同时关联追加的已有渠道 ID 列表'
-    })
+export const CreateModelBodySchema = z.object({
+  modelData: SystemModelDocumentDataSchema.meta({
+    description: '完整模型配置；未声明字段会被忽略，modelId 始终由服务端生成'
+  }),
+  channelType: ModelChannelTypeSchema,
+  channelIds: z.array(IntSchema.positive()).optional().meta({
+    description: '可选：创建模型后同时关联追加的已有渠道 ID 列表'
   })
-  .strict();
+});
 export type CreateModelBody = z.infer<typeof CreateModelBodySchema>;
 
 export const CreateModelResponseSchema = z.object({
@@ -388,30 +383,31 @@ export const CreateModelResponseSchema = z.object({
 export type CreateModelResponse = z.infer<typeof CreateModelResponseSchema>;
 
 /* POST /api/core/ai/model/createFromTemplates */
-export const CreateModelsFromTemplatesBodySchema = z
-  .object({
-    templates: z
-      .array(ModelTemplateReferenceSchema)
-      .min(1)
-      .max(500)
-      .superRefine((templates, ctx) => {
-        const keys = new Set<string>();
-        templates.forEach((template, index) => {
-          const key = template.model;
-          if (keys.has(key)) {
-            ctx.addIssue({
-              code: 'custom',
-              path: [index],
-              message: `Duplicate model template: ${template.model}`
-            });
-          }
-          keys.add(key);
-        });
-      })
-      .meta({ description: '本次选择的模板临时键' }),
-    channelType: ModelChannelTypeSchema
+export const CreateModelsFromTemplatesBodySchema = z.object({
+  templates: z
+    .array(ModelTemplateReferenceSchema)
+    .min(1)
+    .max(500)
+    .superRefine((templates, ctx) => {
+      const keys = new Set<string>();
+      templates.forEach((template, index) => {
+        const key = template.model;
+        if (keys.has(key)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [index],
+            message: `Duplicate model template: ${template.model}`
+          });
+        }
+        keys.add(key);
+      });
+    })
+    .meta({ description: '本次选择的模板临时键' }),
+  channelType: ModelChannelTypeSchema,
+  channelIds: z.array(IntSchema.positive()).optional().meta({
+    description: '可选：批量创建模型后同时关联追加的已有渠道 ID 列表'
   })
-  .strict();
+});
 export type CreateModelsFromTemplatesBody = z.infer<typeof CreateModelsFromTemplatesBodySchema>;
 
 export const CreatedModelSchema = ModelTemplateReferenceSchema.extend({
@@ -437,34 +433,22 @@ const UpdateModelField = {
 
 export const UpdateModelDataSchema = z
   .discriminatedUnion('type', [
-    LLMSystemModelDocumentSchema.omit({ tmbId: true, teamId: true })
-      .extend(UpdateModelField)
-      .strict(),
-    EmbeddingSystemModelDocumentSchema.omit({ tmbId: true, teamId: true })
-      .extend(UpdateModelField)
-      .strict(),
-    TTSSystemModelDocumentSchema.omit({ tmbId: true, teamId: true })
-      .extend(UpdateModelField)
-      .strict(),
-    STTSystemModelDocumentSchema.omit({ tmbId: true, teamId: true })
-      .extend(UpdateModelField)
-      .strict(),
-    RerankSystemModelDocumentSchema.omit({ tmbId: true, teamId: true })
-      .extend(UpdateModelField)
-      .strict()
+    LLMSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    EmbeddingSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    TTSSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    STTSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    RerankSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField)
   ])
   .meta({
     description: '模型可编辑参数；model 为可选更新，type 仅用于分支校验不参与类型变更'
   });
 export type UpdateModelData = z.infer<typeof UpdateModelDataSchema>;
 
-export const UpdateModelBodySchema = z
-  .object({
-    modelId: ModelIdSchema,
-    modelData: UpdateModelDataSchema,
-    channelType: ModelChannelTypeSchema
-  })
-  .strict();
+export const UpdateModelBodySchema = z.object({
+  modelId: ModelIdSchema,
+  modelData: UpdateModelDataSchema,
+  channelType: ModelChannelTypeSchema
+});
 export type UpdateModelBody = z.infer<typeof UpdateModelBodySchema>;
 
 /* PUT /api/core/ai/model/updateStatus */

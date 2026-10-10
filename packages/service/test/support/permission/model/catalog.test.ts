@@ -135,4 +135,20 @@ describe('member model catalog projection', () => {
     });
     expect((await getTeamModelHandle({ teamId })).getTeamModels()).toHaveLength(1);
   });
+  it('allows system models with configured permissions to members with management permission even when not in collaborator list', async () => {
+    const system = await createModel({ channelType: 'system', modelData: draft });
+    const otherPrivate = await createModel({ ...owner, tmbId: otherTmbId, modelData: draft });
+    await grant(system.modelId, otherTmbId);
+
+    const normalTmbId = new Types.ObjectId().toString();
+    const adminTmbId = new Types.ObjectId().toString();
+
+    const normalIds = await getMemberModelIds({ teamId, tmbId: normalTmbId });
+    expect(normalIds).not.toContain(system.modelId);
+    expect(normalIds).not.toContain(otherPrivate.modelId);
+
+    const adminIds = await getMemberModelIds({ teamId, tmbId: adminTmbId, hasManagePer: true });
+    expect(adminIds).toContain(system.modelId);
+    expect(adminIds).not.toContain(otherPrivate.modelId);
+  });
 });

@@ -46,7 +46,7 @@ const EditChannelModal = ({
   allowEmptyModels?: boolean;
   channelType: ChannelType;
   onClose: () => void;
-  onSuccess: (createdChannelId?: number) => unknown | Promise<unknown>;
+  onSuccess: (createdChannelData?: ChannelInfoType) => unknown | Promise<unknown>;
 }) => {
   const { t, i18n } = useSafeTranslation();
   const {
@@ -130,7 +130,7 @@ const EditChannelModal = ({
         channelType,
         model_mapping: data.model_mapping ?? {}
       });
-      await onSuccess();
+      await onSuccess(data);
     },
     {
       onSuccess() {

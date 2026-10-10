@@ -35,11 +35,18 @@ export const assertMemberModelPermission = (
 };
 
 /**
- * 团队模型/渠道是商业版能力：开源版即使绕过前端直接调用接口，也要在服务端拒绝。
+ * 团队模型/渠道是商业版能力且受功能清单开关控制：
+ * 1. 开源版拒绝访问（commercialFeature）
+ * 2. 管理员未开启团队模型功能时拒绝访问（teamModelDisabled）
  * system 作用域是各版本共有的管理员能力，不经过这里。
  */
-const assertTeamModelEnabled = (): Promise<void> =>
-  isProVersion() ? Promise.resolve() : Promise.reject(SystemErrEnum.commercialFeature);
+export const assertTeamModelEnabled = (): Promise<void> => {
+  if (!isProVersion()) return Promise.reject(SystemErrEnum.commercialFeature);
+  if (global.feConfigs?.enable_team_model === false) {
+    return Promise.reject(ModelErrEnum.teamModelDisabled);
+  }
+  return Promise.resolve();
+};
 
 /**
  * 模型/渠道接口的作用域鉴权守卫（不含成员管理权限，权限校验见 authModelManage）：

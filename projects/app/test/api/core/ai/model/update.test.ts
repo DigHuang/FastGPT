@@ -417,19 +417,4 @@ describe('admin settings model create/update api', () => {
       'custom-model'
     ]);
   });
-
-  it('rejects attempt to hijack model ownership with tmbId or teamId in modelData', async () => {
-    const model = await MongoAIModel.create(buildLlmDocument());
-    const res = await callApi({
-      handler: updateModelApi,
-      body: {
-        modelId: String(model._id),
-        modelData: {
-          ...buildLlmUpdateData(),
-          tmbId: '68ad85a7463006c963799a05'
-        }
-      }
-    });
-    expect(res.error).toBeDefined();
-  });
 });

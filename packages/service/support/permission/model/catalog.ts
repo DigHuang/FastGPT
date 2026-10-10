@@ -15,12 +15,12 @@ import {
   getResourcePermissionsByTeam
 } from '../resourcePermissionService';
 
-/** 返回成员权限范围内的模型 ID；默认仅启用模型，展示目录可显式包含停用模型。 */
 export const getMemberModelCatalogPermission = async ({
   teamId,
   tmbId,
   catalogSnapshot,
-  includeInactive = false
+  includeInactive = false,
+  hasManagePer
 }: {
   teamId: string;
   tmbId: string;
@@ -28,6 +28,7 @@ export const getMemberModelCatalogPermission = async ({
   includeInactive?: boolean;
   /** 调用方传入同一快照，避免权限计算期间混用目录版本。 */
   catalogSnapshot?: { models: SystemModelDataType[]; version: string };
+  hasManagePer?: boolean;
 }) => {
   const snapshot =
     catalogSnapshot ??
@@ -81,9 +82,11 @@ export const getMemberModelCatalogPermission = async ({
     rps.map(getPermissionModelId).filter((modelId): modelId is string => !!modelId)
   );
 
-  // 1. 系统模型中未配置限定权限的（默认全员可用）
-  const unconfiguredSystemModels = allModels.filter(
-    (model) => !isTeamModel(model) && !permissionConfiguredModelSet.has(model.modelId)
+  // 1. 系统模型：有管理权限 (hasManagePer) 全量可用；普通成员仅未配置限定权限的可用（默认全员可用）
+  const visibleSystemModels = allModels.filter(
+    (model) =>
+      !isTeamModel(model) &&
+      (Boolean(hasManagePer) || !permissionConfiguredModelSet.has(model.modelId))
   );
 
   const allModelsMap = new Map(allModels.map((m) => [m.modelId, m]));
@@ -116,7 +119,7 @@ export const getMemberModelCatalogPermission = async ({
 
   const modelIds = Array.from(
     new Set([
-      ...unconfiguredSystemModels.map((m) => m.modelId),
+      ...visibleSystemModels.map((m) => m.modelId),
       ...myCollaboratorModelIds,
       ...myOwnedTeamModels.map((m) => m.modelId)
     ])

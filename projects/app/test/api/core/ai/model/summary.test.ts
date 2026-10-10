@@ -72,6 +72,7 @@ describe('POST /api/core/ai/model/summary', () => {
     expect(mocks.permission).toHaveBeenCalledWith({
       teamId: 'team',
       tmbId: 'member',
+      hasManagePer: false,
       includeInactive: true,
       catalogSnapshot: expect.objectContaining({
         version: expect.any(String),
@@ -98,6 +99,7 @@ describe('POST /api/core/ai/model/summary', () => {
     expect(mocks.permission).toHaveBeenCalledWith({
       teamId: 'link-team',
       tmbId: 'link-member',
+      hasManagePer: false,
       includeInactive: true,
       catalogSnapshot: expect.objectContaining({
         version: expect.any(String),

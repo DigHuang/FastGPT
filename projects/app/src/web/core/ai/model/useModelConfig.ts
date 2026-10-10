@@ -13,7 +13,6 @@ import type {
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { getModelConfig } from './api';
 import { useUserModelStore } from './useUserModelStore';
-import { clearModelCollaboratorsCache } from './useModelCollaborators';
 
 type ModelConfigResponse = GetSystemModelConfigResponse | GetTeamModelsResponse;
 
@@ -73,7 +72,6 @@ export const useModelConfig = ({
   );
   const refresh = useCallback(async () => {
     useUserModelStore.getState().clearMemory();
-    clearModelCollaboratorsCache();
     await runAsync();
   }, [runAsync]);
 
