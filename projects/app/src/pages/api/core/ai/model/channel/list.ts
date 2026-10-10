@@ -1,17 +1,20 @@
-import type { ApiRequestProps } from '@fastgpt/next/type';
+import { TeamModelCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
 import { NextAPI } from '@/service/middleware/entry';
-import { authModelManage } from '@fastgpt/service/support/permission/model/auth';
-import {
-  getMemberChannelList,
-  getSystemChannelList
-} from '@fastgpt/service/core/ai/model/channel/list';
-import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import {
   ListChannelsQuerySchema,
   ListChannelsResponseSchema,
   type ListChannelsQuery,
   type ListChannelsResponse
 } from '@fastgpt/global/openapi/core/ai/model/channel/api';
+import type { ApiRequestProps } from '@fastgpt/next/type';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import {
+  getMemberChannelList,
+  getSystemChannelList
+} from '@fastgpt/service/core/ai/model/channel/list';
+import { assertTeamModelEnabled } from '@fastgpt/service/core/ai/model/utils';
+import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 
 /** 查询渠道列表：root 可查看系统渠道或私有渠道，成员查看私有渠道 */
 async function handler(
@@ -22,7 +25,17 @@ async function handler(
     querySchema: ListChannelsQuerySchema
   }).query;
 
-  const { tmbId, teamId } = await authModelManage({ req, channelType, resource: 'channel' });
+  const actor = await authUserPer({
+    req,
+    authToken: true,
+    per: channelType === 'team' ? TeamModelCreatePermissionVal : undefined
+  });
+  if (channelType === 'system') {
+    if (!actor.isRoot) throw ModelErrEnum.rootOnlyPermit;
+  } else {
+    await assertTeamModelEnabled();
+  }
+  const { tmbId, teamId } = actor;
 
   if (channelType === 'system') {
     return ListChannelsResponseSchema.parse(

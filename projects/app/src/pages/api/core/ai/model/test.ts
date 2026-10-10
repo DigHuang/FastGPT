@@ -1,20 +1,22 @@
-import type { ApiRequestProps } from '@fastgpt/next/type';
+import { TeamModelCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
+import { authModelConfig } from '@/service/core/ai/model/auth';
 import { NextAPI } from '@/service/middleware/entry';
+import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
+import type { ApiRequestProps } from '@fastgpt/next/type';
+import { assertTeamModelEnabled } from '@fastgpt/service/core/ai/model/utils';
+import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
+
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import { channelTypeToScope, isTeamModel } from '@fastgpt/global/core/ai/model/utils';
 import {
-  authAndGetModelInstance,
-  authModelInstanceAccess
-} from '@fastgpt/service/support/permission/model/auth';
-import { testModelConnection } from '@fastgpt/service/core/ai/model/test';
-import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
-import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
-import {
-  TestModelQuerySchema,
   TestDraftModelBodySchema,
+  TestModelQuerySchema,
   type TestDraftModelBody,
   type TestModelQuery
 } from '@fastgpt/global/openapi/core/ai/model/api';
-import { isTeamModel, channelTypeToScope } from '@fastgpt/global/core/ai/model/utils';
-import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { testModelConnection } from '@fastgpt/service/core/ai/model/test';
 
 const logger = getLogger(LogCategories.MODULE.AI.MODEL);
 
@@ -40,15 +42,22 @@ async function handleDraftTest(req: ApiRequestProps<TestDraftModelBody>): Promis
   } as AIModelDataType;
 
   const isTeam = isTeamModel(draftModel);
-  const authResult = await authModelInstanceAccess({ req, model: draftModel });
-
-  // 草稿或未带归属的团队模型测试时，归属回退为当前成员，保证请求落在成员自己的渠道桶
+  const actor = await authUserPer({
+    req,
+    authToken: true,
+    per: isTeam ? TeamModelCreatePermissionVal : undefined
+  });
   if (isTeam) {
-    draftModel.tmbId = draftModel.tmbId ?? authResult.ownerTmbId;
+    await assertTeamModelEnabled();
+    // 草稿尚未成为模型资源，按安装能力检查；归属固定使用当前身份。
+    draftModel.teamId = actor.teamId;
+    draftModel.tmbId = actor.tmbId;
+  } else if (!actor.isRoot) {
+    throw ModelErrEnum.rootOnlyPermit;
   }
 
   logger.debug('Test draft model', { model: draftModel.model, type: draftModel.type, channelId });
-  return testModelConnection({ model: draftModel, teamId: authResult.teamId, channelId });
+  return testModelConnection({ model: draftModel, teamId: actor.teamId, channelId });
 }
 
 /**
@@ -62,11 +71,10 @@ async function handleInstalledTest(
     querySchema: TestModelQuerySchema
   }).query;
 
-  const { model: installedModel, teamId } = await authAndGetModelInstance({
-    req,
-    modelId,
-    channelType
-  });
+  const {
+    actor: { teamId },
+    models: [installedModel]
+  } = await authModelConfig({ req, modelIds: [modelId], channelType });
 
   // 显式渠道只覆盖本次测试的连接配置，不能修改全局运行时模型缓存
   const modelData = channelId

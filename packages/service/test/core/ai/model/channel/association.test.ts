@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import { createModelHandle } from '@fastgpt/service/core/ai/model/handle';
-import { publishSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
-import { clearTeamModelCatalogCache } from '@fastgpt/service/core/ai/model/teamModelCache';
+import {
+  clearTeamModelCatalogCache,
+  publishSystemModelHandle
+} from '@fastgpt/service/core/ai/model/catalog/cache';
+import { createModelHandle } from '@fastgpt/service/core/ai/model/catalog/handle';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { axiosMock, getConfigMock, getTeamModelHandleMock } = vi.hoisted(() => ({
   axiosMock: vi.fn(),
@@ -19,8 +21,8 @@ vi.mock('@fastgpt/service/thirdProvider/aiproxy/config', () => ({
   getAIProxyAdminConfig: getConfigMock
 }));
 
-vi.mock('@fastgpt/service/core/ai/model/index', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@fastgpt/service/core/ai/model/index')>()),
+vi.mock('@fastgpt/service/core/ai/model/catalog/service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@fastgpt/service/core/ai/model/catalog/service')>()),
   getTeamModelHandle: getTeamModelHandleMock
 }));
 
@@ -30,12 +32,12 @@ import {
   getChannelModels,
   getSystemAssociableModels
 } from '@fastgpt/service/core/ai/model/channel/association';
+import { resetChannelCache } from '@fastgpt/service/core/ai/model/channel/cache';
 import {
   getMemberChannelList,
   getSystemChannelList
 } from '@fastgpt/service/core/ai/model/channel/list';
 import { resolveChannelForOperation } from '@fastgpt/service/core/ai/model/channel/resolve';
-import { resetChannelCache } from '@fastgpt/service/core/ai/model/channel/cache';
 import type {
   AiproxyChannel,
   AiproxyGroupChannel

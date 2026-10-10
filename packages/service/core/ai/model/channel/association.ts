@@ -1,8 +1,8 @@
 import { Types } from '../../../../common/mongo';
-import { getSystemModelHandle, getTeamModelHandle } from '../index';
-import { hasLegacyRequestUrl } from '../../legacy/requestUrl';
-import type { AiproxyChannel, AiproxyGroupChannel } from '../../../../thirdProvider/aiproxy/type';
 import { parseTmbIdFromGroupId } from '../../../../thirdProvider/aiproxy/group';
+import type { AiproxyChannel, AiproxyGroupChannel } from '../../../../thirdProvider/aiproxy/type';
+import { hasLegacyRequestUrl } from '../../legacy/requestUrl';
+import { getSystemModelHandle, getTeamModelHandle } from '../catalog/service';
 import { getAiproxyClientByGroupId } from './client';
 
 /** 渠道关联查询使用的模型投影，不携带完整模型配置。 */

@@ -1,21 +1,30 @@
-import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { UserError } from '@fastgpt/global/common/error/utils';
-import { Types } from '../../../common/mongo';
-import type { ModelCatalogScope } from './catalog/entity';
-import { runModelTransaction } from './catalog/transaction';
-import { deleteModelRecords } from './cleanup';
-import { MongoAIModel } from './schema';
-import { updatedReloadSystemModel } from './catalog/service';
-import { invalidateTeamModelCatalog } from './teamModelCache';
-import { refreshModelTemplates } from './template';
+import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
+import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import type {
   CreateModelBody,
   CreateModelsFromTemplatesBody,
   UpdateModelBody
 } from '@fastgpt/global/openapi/core/ai/model/api';
+import { getLogger, LogCategories } from '../../../common/logger';
+import { Types } from '../../../common/mongo';
+import { invalidateTeamModelCatalog } from './catalog/cache';
+import type { ModelCatalogScope } from './catalog/entity';
+import { updatedReloadSystemModel } from './catalog/service';
+import { runModelTransaction } from './catalog/transaction';
+import {
+  removeModelsFromChannels,
+  syncModelNameInChannels,
+  updateModelChannelBindings
+} from './channel/binding';
+import { deleteModelRecords } from './cleanup';
+import { importSystemModels as importSystemModelRecords } from './import';
+import { MongoAIModel } from './schema';
+import { refreshModelTemplates } from './template';
 import { getModelConfigUpdate, sanitizeTeamModelData } from './utils';
-import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
+
+const logger = getLogger(LogCategories.MODULE.AI.MODEL);
 
 type ModelMutationOwner = { channelType?: ChannelType; tmbId?: string; teamId?: string };
 
@@ -42,7 +51,7 @@ const refreshMutationCatalog = async (context: ModelCatalogScope) => {
   else await updatedReloadSystemModel();
 };
 
-/** 原子校验归属、类型和重名并更新配置；返回名称变更，渠道副作用由生命周期层协调。 */
+/** 原子校验归属、类型和重名并更新配置；提交后同步渠道名称，失败补偿本次数据库名称变更。 */
 export const updateModel = async ({
   modelId,
   modelData,
@@ -75,6 +84,12 @@ export const updateModel = async ({
     return { modelId, oldModel: existing.model, newModel };
   });
   await refreshMutationCatalog(context);
+  await synchronizeModelRenames({
+    changes: [change],
+    channelType: owner.channelType ?? 'system',
+    tmbId: owner.tmbId,
+    teamId: owner.teamId
+  });
   return change;
 };
 
@@ -127,8 +142,9 @@ export const updateModelStatus = async ({
 /** 创建时覆盖请求中的归属字段；团队模型去除系统专用的直连配置，唯一索引负责并发重名兜底。 */
 export const createModel = async ({
   modelData,
+  channelIds,
   ...owner
-}: Pick<CreateModelBody, 'modelData' | 'channelType'> & ModelMutationOwner) => {
+}: Pick<CreateModelBody, 'modelData' | 'channelType' | 'channelIds'> & ModelMutationOwner) => {
   const { context, filter } = getMutationScope(owner);
   const { tmbId: _tmbId, teamId: _teamId, scope: _scope, ...data } = modelData;
   const [model] = await runModelTransaction(context, async (session) => {
@@ -147,12 +163,19 @@ export const createModel = async ({
     );
   });
   await refreshMutationCatalog(context);
+  await bindCreatedModelsToChannels({
+    models: [modelData.model],
+    channelIds,
+    channelType: owner.channelType ?? 'system',
+    tmbId: owner.tmbId
+  });
   return { modelId: String(model._id) };
 };
 
 /** 从最新模板创建缺失的停用实例；重复提交不会覆盖已安装模型或无意义地增加目录版本。 */
 export const createModelsFromTemplates = async ({
   templates,
+  channelIds,
   ...owner
 }: CreateModelsFromTemplatesBody & ModelMutationOwner) => {
   const { context, filter } = getMutationScope(owner);
@@ -178,18 +201,28 @@ export const createModelsFromTemplates = async ({
     .lean();
   const names = new Set(existing.map(({ model }) => model));
   const missing = selected.filter(({ model }) => !names.has(model));
-  if (missing.length === 0) return { models: [] };
-  const models = await runModelTransaction(context, (session) =>
-    MongoAIModel.insertMany(
-      missing.map((template) => ({
-        ...(context.scope === ModelScopeEnum.team ? sanitizeTeamModelData(template) : template),
-        ...filter,
-        isActive: false
-      })),
-      { session }
-    )
-  );
-  await refreshMutationCatalog(context);
+  const models =
+    missing.length === 0
+      ? []
+      : await runModelTransaction(context, (session) =>
+          MongoAIModel.insertMany(
+            missing.map((template) => ({
+              ...(context.scope === ModelScopeEnum.team
+                ? sanitizeTeamModelData(template)
+                : template),
+              ...filter,
+              isActive: false
+            })),
+            { session }
+          )
+        );
+  if (models.length > 0) await refreshMutationCatalog(context);
+  await bindCreatedModelsToChannels({
+    models: templates.map(({ model }) => model),
+    channelIds,
+    channelType: owner.channelType ?? 'system',
+    tmbId: owner.tmbId
+  });
   return {
     models: models.map((model) => ({
       modelId: String(model._id),
@@ -199,7 +232,7 @@ export const createModelsFromTemplates = async ({
   };
 };
 
-/** 同一事务删除实体、ACL 与探测记录；返回名称供生命周期层清理渠道引用。 */
+/** 同一事务删除实体、ACL 与探测记录；提交后清理渠道引用，渠道失败仅记录诊断。 */
 export const deleteModels = async ({
   modelIds,
   ...owner
@@ -214,5 +247,105 @@ export const deleteModels = async ({
     return records;
   });
   await refreshMutationCatalog(context);
-  return models.map(({ model }) => model);
+  const names = models.map(({ model }) => model);
+  await cleanDeletedModelChannels({
+    models: names,
+    channelType: owner.channelType ?? 'system',
+    tmbId: owner.tmbId
+  });
+  return names;
+};
+
+/** 创建已提交后尽力关联渠道；逐模型保留失败诊断，某项失败不阻断后续关联。 */
+const bindCreatedModelsToChannels = async ({
+  models,
+  channelIds,
+  channelType,
+  tmbId
+}: {
+  models: string[];
+  channelIds?: number[];
+  channelType: ChannelType;
+  tmbId?: string;
+}) => {
+  if (!channelIds?.length) return;
+  for (const model of new Set(models)) {
+    await updateModelChannelBindings({
+      model,
+      addChannelIds: channelIds,
+      channelType,
+      tmbId: tmbId ?? ''
+    }).catch((error) => {
+      logger.error('Append model to channels after creation failed', {
+        channelIds,
+        model,
+        channelType,
+        tmbId,
+        error
+      });
+    });
+  }
+};
+
+/** 普通编辑和 JSON 导入共用改名副作用；渠道内部回滚后补偿 Mongo 名称，失败保留明确诊断。 */
+const synchronizeModelRenames = async ({
+  changes,
+  channelType,
+  tmbId,
+  teamId
+}: {
+  changes: { modelId: string; oldModel: string; newModel: string }[];
+  channelType: ChannelType;
+  tmbId?: string;
+  teamId?: string;
+}) => {
+  const failures: unknown[] = [];
+  for (const change of changes) {
+    if (change.oldModel === change.newModel) continue;
+    try {
+      await syncModelNameInChannels({ ...change, channelType, tmbId: tmbId ?? '' });
+    } catch (error) {
+      await restoreModelName({ ...change, channelType, tmbId, teamId }).catch((rollbackError) => {
+        logger.error('Rollback model name after channel failure failed', {
+          ...change,
+          rollbackError
+        });
+      });
+      failures.push(error);
+    }
+  }
+  // 导入中的各个改名独立提交，某一项失败也要继续同步后续项，避免留下未处理的 Mongo 名称。
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(failures, 'Multiple model channel renames failed');
+};
+
+/** 删除已经提交，渠道清理失败只记录诊断，不能将成功删除误报为数据库失败。 */
+const cleanDeletedModelChannels = async ({
+  models,
+  channelType,
+  tmbId
+}: {
+  models: string[];
+  channelType: ChannelType;
+  tmbId?: string;
+}) => {
+  if (models.length === 0) return;
+  await removeModelsFromChannels({ models, channelType, tmbId: tmbId ?? '' }).catch((error) => {
+    logger.error('Clean up channel mappings after model deletion failed', {
+      channelType,
+      models,
+      error
+    });
+  });
+};
+
+/** JSON 替换与普通 CRUD 共用渠道改名和删除清理，避免导入后留下过期渠道引用。 */
+export const importSystemModels = async (props: Parameters<typeof importSystemModelRecords>[0]) => {
+  const changes = await importSystemModelRecords(props);
+  try {
+    await synchronizeModelRenames({ changes: changes.renamedModels, channelType: 'system' });
+  } finally {
+    await cleanDeletedModelChannels({ models: changes.removedModels, channelType: 'system' });
+  }
 };
