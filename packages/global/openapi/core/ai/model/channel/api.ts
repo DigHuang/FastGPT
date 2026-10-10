@@ -30,6 +30,12 @@ export const CreateChannelBodySchema = ChannelConfigSchema.extend({
 });
 export type CreateChannelBody = z.infer<typeof CreateChannelBodySchema>;
 
+/** POST /api/core/ai/model/channel/create：返回实际创建的渠道身份，前端无需按名称反查。 */
+export const CreateChannelResponseSchema = z.object({
+  id: IntSchema.positive().meta({ example: 12, description: '实际创建的 AIProxy 渠道 ID' })
+});
+export type CreateChannelResponse = z.infer<typeof CreateChannelResponseSchema>;
+
 // ═══ PUT /api/core/ai/model/channel/update ═══
 // AI Proxy 使用 patch 语义：未提供的字段保持不变，显式空值才会覆盖已有配置。
 export const UpdateChannelBodySchema = ChannelConfigSchema.partial().extend({

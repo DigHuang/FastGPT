@@ -3,7 +3,7 @@ import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants
 import { Types } from '@fastgpt/service/common/mongo';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
+import { MongoAIModelCatalog } from '@fastgpt/service/core/ai/model/catalog/schema';
 import {
   createModel,
   updateModel,
@@ -11,7 +11,7 @@ import {
   deleteModels,
   restoreModelName
 } from '@fastgpt/service/core/ai/model/mutation';
-import { readModelCatalogRevision } from '@fastgpt/service/core/ai/model/entity';
+import { readModelCatalogRevision } from '@fastgpt/service/core/ai/model/catalog/entity';
 import { clearTeamModelCatalogCache } from '@fastgpt/service/core/ai/model/teamModelCache';
 
 beforeAll(async () => {
@@ -35,7 +35,7 @@ const draft = {
 };
 
 beforeEach(async () => {
-  await Promise.all([MongoAIModel.deleteMany({}), MongoAIDefaultModel.deleteMany({})]);
+  await Promise.all([MongoAIModel.deleteMany({}), MongoAIModelCatalog.deleteMany({})]);
   clearTeamModelCatalogCache();
 });
 

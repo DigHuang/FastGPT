@@ -33,9 +33,12 @@ import { importSystemModels } from '@fastgpt/service/core/ai/model/import';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
 import { MongoModelStatusProbeRecord } from '@fastgpt/service/core/ai/modelStatus/schema';
 import { connectionMongo } from '@fastgpt/service/common/mongo';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
-import * as catalogEntity from '@fastgpt/service/core/ai/model/entity';
-import { refreshModelHandle, loadInstalledModels } from '@fastgpt/service/core/ai/model/catalog';
+import { MongoAIModelCatalog } from '@fastgpt/service/core/ai/model/catalog/schema';
+import * as catalogEntity from '@fastgpt/service/core/ai/model/catalog/entity';
+import {
+  refreshModelHandle,
+  loadInstalledModels
+} from '@fastgpt/service/core/ai/model/catalog/service';
 import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
 import { PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
 
@@ -61,7 +64,7 @@ describe('system model management integration: MongoDB transactions and runtime 
     await Promise.all([
       MongoAIModel.deleteMany({}),
       MongoModelStatusProbeRecord.deleteMany({}),
-      MongoAIDefaultModel.deleteMany({}),
+      MongoAIModelCatalog.deleteMany({}),
       MongoResourcePermission.deleteMany({})
     ]);
     publishSystemModelHandle(undefined);
@@ -259,17 +262,17 @@ describe('system model management integration: MongoDB transactions and runtime 
       modelData: createDraft('default')
     });
     await updateSystemDefaultModels({ llm: modelId, chatTitleLLM: modelId });
-    const defaultsBefore = await MongoAIDefaultModel.find({}, { defaultModelIds: 1 }).lean();
+    const defaultsBefore = await MongoAIModelCatalog.find({}, { defaultModelIds: 1 }).lean();
     const second = await createSystemModel({ modelData: createDraft('second') });
     expect(second.modelId).not.toBe(modelId);
-    expect(await MongoAIDefaultModel.find({}, { defaultModelIds: 1 }).lean()).toEqual(
+    expect(await MongoAIModelCatalog.find({}, { defaultModelIds: 1 }).lean()).toEqual(
       defaultsBefore
     );
     const revision = await catalogEntity.readModelCatalogRevision({ scope: ModelScopeEnum.system });
     await expect(
       updateSystemDefaultModels({ llm: second.modelId, datasetImageLLM: modelId })
     ).rejects.toBeDefined();
-    expect(await MongoAIDefaultModel.find({}, { defaultModelIds: 1 }).lean()).toEqual(
+    expect(await MongoAIModelCatalog.find({}, { defaultModelIds: 1 }).lean()).toEqual(
       defaultsBefore
     );
     expect(await catalogEntity.readModelCatalogRevision({ scope: ModelScopeEnum.system })).toBe(
@@ -372,7 +375,7 @@ describe('system model management integration: MongoDB transactions and runtime 
   });
 
   it('rolls back MongoDB when model insert fails and succeeds on retry', async () => {
-    const beforeDefaults = await MongoAIDefaultModel.findOne().lean();
+    const beforeDefaults = await MongoAIModelCatalog.findOne().lean();
     vi.spyOn(MongoAIModel, 'create').mockImplementationOnce(() => {
       throw new Error('Injected model insert failure');
     });
@@ -381,7 +384,7 @@ describe('system model management integration: MongoDB transactions and runtime 
     await expect(createSystemModel(input)).rejects.toThrow('Injected model insert failure');
 
     expect(await MongoAIModel.countDocuments()).toBe(0);
-    expect(await MongoAIDefaultModel.findOne().lean()).toEqual(beforeDefaults);
+    expect(await MongoAIModelCatalog.findOne().lean()).toEqual(beforeDefaults);
     expect(await catalogEntity.readModelCatalogRevision({ scope: ModelScopeEnum.system })).toBe(0);
     expect(getCachedSystemModelHandle()?.getAllModels()).toEqual([]);
 

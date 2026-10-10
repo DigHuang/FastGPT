@@ -3,13 +3,13 @@ import { cloneDeep } from 'lodash-es';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import { isSystemModel, isTeamModel } from '@fastgpt/global/core/ai/model/utils';
 import type {
-  EmbeddingSystemModelDataType,
-  LLMSystemModelDataType,
+  EmbeddingModelDataType,
+  LLMModelDataType,
   ModelReferenceType,
-  RerankSystemModelDataType,
-  STTSystemModelDataType,
-  SystemModelDataType,
-  TTSSystemModelDataType
+  RerankModelDataType,
+  STTModelDataType,
+  AIModelDataType,
+  TTSModelDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import type { ModelDefaultIds } from '@fastgpt/global/core/ai/model/default';
 import type { SystemDefaultModelType } from '../type';
@@ -18,7 +18,7 @@ import { UserError } from '@fastgpt/global/common/error/utils';
 import { getModelReferenceValue, isEmptyModelValue } from '@fastgpt/global/core/ai/model/reference';
 
 type ModelSnapshot = {
-  models: SystemModelDataType[];
+  models: AIModelDataType[];
   defaultModels: DefaultModelsBySlot;
   configuredDefaultModelIds: ModelDefaultIds;
   revision: number;
@@ -68,7 +68,7 @@ export const createModelHandle = (input: ModelSnapshot) => {
     if (!isEmptyModelValue(reference.model)) return modelsByName.get(reference.model!);
   };
   const typedGetter =
-    <T extends SystemModelDataType>(type: T['type'], vision = false) =>
+    <T extends AIModelDataType>(type: T['type'], vision = false) =>
     <O extends boolean = false>(
       reference: ModelReferenceType,
       options?: { optional?: O }
@@ -82,23 +82,23 @@ export const createModelHandle = (input: ModelSnapshot) => {
       return model as OptionalResult<T, O>;
     };
 
-  const getVlmModelData = typedGetter<LLMSystemModelDataType>(ModelTypeEnum.llm, true);
+  const getVlmModelData = typedGetter<LLMModelDataType>(ModelTypeEnum.llm, true);
 
   return Object.freeze({
     revision: snapshot.revision,
     version: snapshot.version,
     configuredDefaultModelIds: snapshot.configuredDefaultModelIds,
-    getLLMModelData: typedGetter<LLMSystemModelDataType>(ModelTypeEnum.llm),
-    getEmbeddingModelData: typedGetter<EmbeddingSystemModelDataType>(ModelTypeEnum.embedding),
-    getRerankModelData: typedGetter<RerankSystemModelDataType>(ModelTypeEnum.rerank),
-    getTTSModelData: typedGetter<TTSSystemModelDataType>(ModelTypeEnum.tts),
-    getSTTModelData: typedGetter<STTSystemModelDataType>(ModelTypeEnum.stt),
+    getLLMModelData: typedGetter<LLMModelDataType>(ModelTypeEnum.llm),
+    getEmbeddingModelData: typedGetter<EmbeddingModelDataType>(ModelTypeEnum.embedding),
+    getRerankModelData: typedGetter<RerankModelDataType>(ModelTypeEnum.rerank),
+    getTTSModelData: typedGetter<TTSModelDataType>(ModelTypeEnum.tts),
+    getSTTModelData: typedGetter<STTModelDataType>(ModelTypeEnum.stt),
     getVlmModelData,
     /** 展示/编辑允许停用项；返回副本供草稿临时覆盖配置，不暴露共享对象。 */
     findModelData: <T extends `${ModelTypeEnum}` = `${ModelTypeEnum}`>(
       reference: ModelReferenceType,
       options?: { type?: T; vision?: boolean }
-    ): Extract<SystemModelDataType, { type: T }> | undefined => {
+    ): Extract<AIModelDataType, { type: T }> | undefined => {
       const model = resolve(reference);
       if (
         !model ||
@@ -106,7 +106,7 @@ export const createModelHandle = (input: ModelSnapshot) => {
         (options?.vision && !(model.type === ModelTypeEnum.llm && model.config.vision))
       )
         return;
-      return cloneDeep(model) as Extract<SystemModelDataType, { type: T }>;
+      return cloneDeep(model) as Extract<AIModelDataType, { type: T }>;
     },
     /** 保留原缺省约定：图片与标题可缺省，其余默认槽位缺失时明确报错。 */
     getDefaultModelData: <S extends DefaultSlot>(slot: S): DefaultResult<S> => {

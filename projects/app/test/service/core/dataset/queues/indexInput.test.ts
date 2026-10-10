@@ -7,8 +7,8 @@ import {
 } from '@/service/core/dataset/queues/indexInput';
 import { DatasetDataIndexTypeEnum } from '@fastgpt/global/core/dataset/data/constants';
 import type {
-  EmbeddingSystemModelDataType,
-  LLMSystemModelDataType
+  EmbeddingModelDataType,
+  LLMModelDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import {
   DatasetCollectionTypeEnum,
@@ -46,8 +46,8 @@ const seedSynonymFixture = async (
   return seedDatasetSynonymRebuildTasks(context);
 };
 
-let visionEmbeddingModel: EmbeddingSystemModelDataType;
-let vlmModel: LLMSystemModelDataType;
+let visionEmbeddingModel: EmbeddingModelDataType;
+let vlmModel: LLMModelDataType;
 const teamId = '68ad85a7463006c963799a06';
 
 beforeEach(() => {

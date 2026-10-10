@@ -2,7 +2,7 @@ import type { NodeHttpResponse } from '../../../types/http';
 import { getAIApi, getModelOpenAIOptions } from '../config';
 import { normalizeRelayNoChannelError } from '../../../thirdProvider/aiproxy/error';
 import { Readable } from 'stream';
-import type { TTSSystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { TTSModelDataType } from '@fastgpt/global/core/ai/model/schema';
 
 /** 生产播报与模型探测共用的 TTS 请求入口，统一路由、超时、取消和无可用渠道错误。 */
 export const requestSpeech = async ({
@@ -16,7 +16,7 @@ export const requestSpeech = async ({
   maxRetries,
   onRequestStart
 }: {
-  model: TTSSystemModelDataType;
+  model: TTSModelDataType;
   voice: string;
   input: string;
   speed?: number;
@@ -58,10 +58,10 @@ export async function text2Speech({
   speed = 1
 }: {
   res: NodeHttpResponse;
-  onSuccess: (e: { model: TTSSystemModelDataType; buffer: Buffer }) => void;
+  onSuccess: (e: { model: TTSModelDataType; buffer: Buffer }) => void;
   onError: (e: any) => void;
   input: string;
-  model: TTSSystemModelDataType;
+  model: TTSModelDataType;
   voice: string;
   speed?: number;
 }) {

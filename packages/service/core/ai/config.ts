@@ -1,6 +1,6 @@
 import OpenAI from '@fastgpt/global/core/ai';
 import { type OpenaiAccountType } from '@fastgpt/global/support/user/team/type';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { isSystemModel } from '@fastgpt/global/core/ai/model/utils';
 import { serviceEnv } from '../../env';
 import { getMemberGroupId } from '../../thirdProvider/aiproxy/group';
@@ -75,7 +75,7 @@ export const getAxiosConfig = (props?: { userKey?: OpenaiAccountType }) => {
  * global: 仅路由至系统渠道；own: 仅路由至当前团队成员私有渠道分组。
  */
 export type AiproxyScopeModelInput =
-  | SystemModelDataType
+  | AIModelDataType
   | { isSystem?: boolean; tmbId?: string | null; scope?: string }
   | undefined;
 

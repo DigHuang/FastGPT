@@ -1,4 +1,4 @@
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import {
   GetModelDetailResponseSchema,
   GetSystemModelConfigResponseSchema,
@@ -14,7 +14,7 @@ import {
   groupChannelSummariesByModel
 } from './channel/summary';
 import { getSystemModelHandle, getTeamModelHandle } from './index';
-import { desensitizeSystemModel } from './transform';
+import { desensitizeModel } from './transform';
 
 /** 聚合管理员视角系统模型、渠道、Provider 与默认模型配置。 */
 export const getSystemModelConfigService = async (): Promise<GetSystemModelConfigResponse> => {
@@ -25,7 +25,7 @@ export const getSystemModelConfigService = async (): Promise<GetSystemModelConfi
 
   return GetSystemModelConfigResponseSchema.parse({
     models: modelHandle.getSystemModels().map((model) => ({
-      ...desensitizeSystemModel(model),
+      ...desensitizeModel(model),
       channels: channelsByModel.get(model.model) ?? []
     })),
     channels: channelItems.map((channel) => channel.summary),
@@ -67,7 +67,7 @@ export const getModelDetailService = async ({
   model,
   ownerTmbId
 }: {
-  model: SystemModelDataType;
+  model: AIModelDataType;
   ownerTmbId?: string;
 }): Promise<GetModelDetailResponse> => {
   const channelItems = ownerTmbId

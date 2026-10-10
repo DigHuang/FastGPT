@@ -1,10 +1,10 @@
 import type {
-  EmbeddingSystemModelDataType,
-  LLMSystemModelDataType,
-  RerankSystemModelDataType,
-  STTSystemModelDataType,
-  SystemModelDataType,
-  TTSSystemModelDataType
+  EmbeddingModelDataType,
+  LLMModelDataType,
+  RerankModelDataType,
+  STTModelDataType,
+  AIModelDataType,
+  TTSModelDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import { isProduction } from '@fastgpt/global/common/system/constants';
 import { UserError } from '@fastgpt/global/common/error/utils';
@@ -41,7 +41,7 @@ export const testModelConnection = async ({
   signal: parentSignal,
   onRequestStart
 }: {
-  model: SystemModelDataType;
+  model: AIModelDataType;
   teamId?: string;
   channelId?: number;
   timeoutMs?: number;
@@ -108,7 +108,7 @@ const testLLMModel = async ({
   signal,
   onRequestStart
 }: {
-  model: LLMSystemModelDataType;
+  model: LLMModelDataType;
   headers: Record<string, string>;
   teamId: string;
   timeoutMs: number;
@@ -145,7 +145,7 @@ const testEmbeddingModel = ({
   signal,
   onRequestStart
 }: {
-  model: EmbeddingSystemModelDataType;
+  model: EmbeddingModelDataType;
   headers: Record<string, string>;
   timeoutMs: number;
   signal: AbortSignal;
@@ -171,7 +171,7 @@ const testTTSModel = async ({
   signal,
   onRequestStart
 }: {
-  model: TTSSystemModelDataType;
+  model: TTSModelDataType;
   headers: Record<string, string>;
   timeoutMs: number;
   signal: AbortSignal;
@@ -204,7 +204,7 @@ const testSTTModel = async ({
   signal,
   onRequestStart
 }: {
-  model: STTSystemModelDataType;
+  model: STTModelDataType;
   headers: Record<string, string>;
   timeoutMs: number;
   signal: AbortSignal;
@@ -234,7 +234,7 @@ const testReRankModel = async ({
   signal,
   onRequestStart
 }: {
-  model: RerankSystemModelDataType;
+  model: RerankModelDataType;
   headers: Record<string, string>;
   timeoutMs: number;
   signal: AbortSignal;

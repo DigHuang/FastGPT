@@ -4,7 +4,7 @@ import { ChatSourceTypeEnum } from '@fastgpt/global/core/chat/constants';
 import { DatasetErrEnum } from '@fastgpt/global/common/error/code/dataset';
 import { AppErrEnum } from '@fastgpt/global/common/error/code/app';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
-import { SystemModelDataSchema } from '@fastgpt/global/core/ai/model/schema';
+import { AIModelDataSchema } from '@fastgpt/global/core/ai/model/schema';
 import { createModelHandle } from '@fastgpt/service/core/ai/model/handle';
 
 const mocks = vi.hoisted(() => ({
@@ -272,7 +272,7 @@ describe('team models in App resource permissions', () => {
       { modelId: disabledId, tmbId, isActive: false },
       { modelId: privateId, tmbId: '65f000000000000000000099', isActive: true }
     ].map((model) =>
-      SystemModelDataSchema.parse({
+      AIModelDataSchema.parse({
         ...model,
         model: model.modelId,
         name: 'Private model',

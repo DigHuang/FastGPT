@@ -1,3 +1,4 @@
+import type { CreateChannelResponse } from '@fastgpt/global/openapi/core/ai/model/channel/api';
 import { type ChannelInfoType } from '@fastgpt/global/core/ai/model/channel';
 import { Box, type BoxProps, Button, Flex, Input, HStack } from '@chakra-ui/react';
 import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
@@ -46,7 +47,7 @@ const EditChannelModal = ({
   allowEmptyModels?: boolean;
   channelType: ChannelType;
   onClose: () => void;
-  onSuccess: (createdChannelData?: ChannelInfoType) => unknown | Promise<unknown>;
+  onSuccess: (createdChannelData?: CreateChannelResponse) => unknown | Promise<unknown>;
 }) => {
   const { t, i18n } = useSafeTranslation();
   const {
@@ -124,13 +125,13 @@ const EditChannelModal = ({
         return;
       }
 
-      await postCreateChannel({
+      const createdChannel = await postCreateChannel({
         ...data,
         status: data.status === 1 || data.status === 2 ? data.status : undefined,
         channelType,
         model_mapping: data.model_mapping ?? {}
       });
-      await onSuccess(data);
+      await onSuccess(createdChannel);
     },
     {
       onSuccess() {

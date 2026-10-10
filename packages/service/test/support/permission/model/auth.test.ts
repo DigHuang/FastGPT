@@ -1,6 +1,6 @@
+import { assertMemberModelPermission } from '@fastgpt/service/support/permission/model/policy';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  assertMemberModelPermission,
   authModelManage,
   authModelScopeOperation
 } from '@fastgpt/service/support/permission/model/auth';

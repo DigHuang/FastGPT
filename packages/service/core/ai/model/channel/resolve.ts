@@ -75,23 +75,10 @@ export const resolveChannelObservabilityScope = async ({
   tmbId: string;
   isRoot: boolean;
 }): Promise<{ groupId?: string }> => {
-  if (channelType === 'system') {
-    if (!isRoot) return Promise.reject(ModelErrEnum.rootOnlyPermit);
-    if (channelId !== undefined) {
-      const channel = await tolerateNotFound(() =>
-        getAiproxyClientByScope({ channelType, tmbId }).channels.get(channelId)
-      );
-      if (!channel) return Promise.reject(ModelErrEnum.channelNotExist);
-    }
-    return {};
-  }
-
-  const groupId = getMemberGroupId(tmbId);
+  if (channelType === 'system' && !isRoot) return Promise.reject(ModelErrEnum.rootOnlyPermit);
   if (channelId !== undefined) {
-    const channel = await tolerateNotFound(() =>
-      getAiproxyClientByScope({ channelType, tmbId }).channels.get(channelId)
-    );
-    if (!channel) return Promise.reject(ModelErrEnum.channelNotExist);
+    const resolved = await resolveChannelForOperation({ id: channelId, channelType, tmbId });
+    return resolved.kind === 'group' ? { groupId: resolved.groupId } : {};
   }
-  return { groupId };
+  return channelType === 'team' ? { groupId: getMemberGroupId(tmbId) } : {};
 };

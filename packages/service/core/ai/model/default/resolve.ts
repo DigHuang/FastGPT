@@ -1,5 +1,5 @@
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import type { ModelDefaultIds } from '@fastgpt/global/core/ai/model/default';
 
 /**
@@ -10,7 +10,7 @@ export const resolveEffectiveDefaultModelIds = ({
   models,
   configuredDefaults
 }: {
-  models: SystemModelDataType[];
+  models: AIModelDataType[];
   configuredDefaults: ModelDefaultIds;
 }): ModelDefaultIds => {
   models = models.filter((model) => model.isActive);
@@ -22,9 +22,9 @@ export const resolveEffectiveDefaultModelIds = ({
   }: {
     configuredId?: string;
     type: ModelTypeEnum;
-    predicate?: (model: SystemModelDataType) => boolean;
+    predicate?: (model: AIModelDataType) => boolean;
   }) => {
-    const isCandidate = (model?: SystemModelDataType) =>
+    const isCandidate = (model?: AIModelDataType) =>
       !!model && model.type === type && (!predicate || predicate(model));
     const configuredModel = configuredId ? modelMap.get(configuredId) : undefined;
     return isCandidate(configuredModel)

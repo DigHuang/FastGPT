@@ -31,7 +31,7 @@ import {
 } from '@/web/core/ai/model/api';
 import type { ModelConfigListItem } from '@fastgpt/global/openapi/core/ai/model/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import ModelScopeCell from '@/components/core/ai/ModelScopeCell';
 import MyBox from '@fastgpt/web/components/common/MyBox';
 import MyIconButton from '@fastgpt/web/components/common/Icon/button';
@@ -114,13 +114,7 @@ const ModelEditButton = React.memo(
 );
 ModelEditButton.displayName = 'ModelEditButton';
 
-const ModelTable = ({
-  Tab,
-  channelType
-}: {
-  Tab: React.ReactNode;
-  channelType: ChannelType;
-}) => {
+const ModelTable = ({ Tab, channelType }: { Tab: React.ReactNode; channelType: ChannelType }) => {
   const { t, i18n } = useSafeTranslation();
   const { toast } = useToast();
   const { userInfo } = useUserStore();
@@ -543,11 +537,8 @@ const ModelTable = ({
                             <ModelScopeCell
                               modelId={item.modelId}
                               scope={item.scope}
+                              ownerTmbId={item.tmbId}
                               isAccountConfig
-                              hasManagePer={Boolean(
-                                userInfo?.team.permission.hasManagePer ||
-                                item.tmbId === userInfo?.team.tmbId
-                              )}
                               selectedHint={t('config_model:available_range')}
                             />
                           </Td>
@@ -697,7 +688,7 @@ const ModelTable = ({
       )}
       {isOpenDefaultModel && (
         <DefaultModelModal
-          models={modelItems as unknown as SystemModelDataType[]}
+          models={modelItems as unknown as AIModelDataType[]}
           defaultModelIds={
             modelConfigData && 'defaultModelIds' in modelConfigData
               ? modelConfigData.defaultModelIds

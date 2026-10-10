@@ -1,6 +1,6 @@
 import type {
-  SystemModelDataType,
-  SystemModelDocumentDataType
+  AIModelDataType,
+  AIModelDocumentDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import { resolveChannelType } from '@fastgpt/global/core/ai/model/utils';
@@ -11,8 +11,8 @@ import { normalizeModelPricingForSave } from '@fastgpt/global/core/ai/model/pric
 
 /** 保留完整未保存草稿，仅规范测试接口要求的模型标识和回退别名。 */
 export const prepareDraftModelForTest = (
-  modelData: SystemModelDocumentDataType
-): SystemModelDocumentDataType => {
+  modelData: AIModelDocumentDataType
+): AIModelDocumentDataType => {
   const model = modelData.model.trim();
   const draft = { ...modelData, model, name: modelData.name?.trim() || model };
   if (draft.type === ModelTypeEnum.llm) {
@@ -33,7 +33,7 @@ export const submitCreatedModel = async ({
   channelType,
   channelIds
 }: {
-  modelData: SystemModelDocumentDataType;
+  modelData: AIModelDocumentDataType;
   channelType?: ChannelType;
   channelIds?: number[];
 }) => {
@@ -51,8 +51,8 @@ export const submitUpdatedModel = async ({
   modelData,
   channelType
 }: {
-  modelId: SystemModelDataType['modelId'];
-  modelData: SystemModelDocumentDataType;
+  modelId: AIModelDataType['modelId'];
+  modelData: AIModelDocumentDataType;
   channelType?: ChannelType;
 }) => {
   const normalizedModelData = normalizeModelPricingForSave(modelData);

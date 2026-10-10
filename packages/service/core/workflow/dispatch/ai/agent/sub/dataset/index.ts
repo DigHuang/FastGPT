@@ -34,14 +34,14 @@ import { filterDatasetsByTmbId } from '../../../../../../dataset/utils';
 import { loadWorkflowDatasetResource } from '../../../../../utils/resource';
 import { resolveReadableCollectionIds } from '../../../../../../../support/permission/collection/auth';
 import { normalizeDatasetSearchInput } from '../../../../dataset/utils';
-import type { LLMSystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { LLMModelDataType } from '@fastgpt/global/core/ai/model/schema';
 const logger = getLogger(LogCategories.MODULE.AI.AGENT);
 
 type DatasetSearchParams = {
   teamId: string;
   tmbId: string;
   args: string;
-  llmModel: LLMSystemModelDataType;
+  llmModel: LLMModelDataType;
   userKey?: OpenaiAccountType;
   datasetParams?: AppFormEditFormType['dataset'];
   dynamicDataset?: boolean;
@@ -86,7 +86,7 @@ const selectRelevantChunksByLLM = async ({
 }: {
   query: string;
   chunks: SearchDataResponseItemType[];
-  model: LLMSystemModelDataType;
+  model: LLMModelDataType;
   userKey?: OpenaiAccountType;
   teamId: string;
 }): Promise<

@@ -11,7 +11,7 @@ import {
   type GetModelCatalogResponse
 } from '@fastgpt/global/openapi/core/ai/model/api';
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
-import { desensitizeSystemModel } from '@fastgpt/service/core/ai/model/transform';
+import { desensitizeModel } from '@fastgpt/service/core/ai/model/transform';
 import { resolveEffectiveDefaultModelIds } from '@fastgpt/service/core/ai/model/default/resolve';
 import { isTeamModel } from '@fastgpt/global/core/ai/model/utils';
 
@@ -50,7 +50,7 @@ export async function handler(
   return GetModelCatalogResponseSchema.parse({
     version,
     data: {
-      models: models.map(desensitizeSystemModel),
+      models: models.map(desensitizeModel),
       providers,
       defaultModelIds: resolveEffectiveDefaultModelIds({
         models,

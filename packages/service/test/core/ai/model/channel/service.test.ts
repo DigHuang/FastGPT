@@ -83,7 +83,7 @@ describe('channel service', () => {
   describe('createChannel', () => {
     it('creates channel successfully when the member group has no existing channels', async () => {
       mocks.group.list.mockResolvedValue({ channels: [], total: 0 });
-      mocks.group.create.mockResolvedValue(undefined);
+      mocks.group.create.mockResolvedValue({ id: 12 });
 
       await expect(
         createChannel({
@@ -96,7 +96,7 @@ describe('channel service', () => {
             models: ['model-1']
           }
         })
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ id: 12 });
 
       expect(mocks.group.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -105,6 +105,38 @@ describe('channel service', () => {
           key: 'sk-new',
           models: ['model-1']
         })
+      );
+    });
+
+    it('applies protocol defaults on the server and preserves explicit overrides', async () => {
+      mocks.group.create.mockResolvedValue({ id: 12 });
+      const channelData = { name: '  normalized  ', type: 1, key: 'sk-new', models: [] };
+      await createChannel({ channelType: 'team', tmbId: TMB_ID, channelData });
+      expect(mocks.group.create).toHaveBeenLastCalledWith({
+        ...channelData,
+        name: 'normalized',
+        configs: { map_reasoning_to_reasoning_content: true }
+      });
+      await createChannel({
+        channelType: 'team',
+        tmbId: TMB_ID,
+        channelData: {
+          ...channelData,
+          configs: { map_reasoning_to_reasoning_content: false, custom: 1 }
+        }
+      });
+      expect(mocks.group.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          configs: { map_reasoning_to_reasoning_content: false, custom: 1 }
+        })
+      );
+      await createChannel({
+        channelType: 'system',
+        tmbId: TMB_ID,
+        channelData: { ...channelData, type: 14, configs: { custom: 2 } }
+      });
+      expect(mocks.system.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ configs: { custom: 2 } })
       );
     });
 

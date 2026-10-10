@@ -8,8 +8,9 @@ const configMocks = vi.hoisted(() => ({
   updatedReloadSystemModel: vi.fn()
 }));
 
-vi.mock('@fastgpt/service/core/ai/model/catalog', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@fastgpt/service/core/ai/model/catalog')>();
+vi.mock('@fastgpt/service/core/ai/model/catalog/service', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@fastgpt/service/core/ai/model/catalog/service')>();
 
   return {
     ...actual,
@@ -20,7 +21,7 @@ vi.mock('@fastgpt/service/core/ai/model/catalog', async (importOriginal) => {
 vi.mock('@fastgpt/service/core/ai/model/channel/binding', () => ({
   syncModelNameInChannels: vi.fn().mockResolvedValue(undefined),
   removeModelsFromChannels: vi.fn().mockResolvedValue(undefined),
-  appendModelToChannels: vi.fn().mockResolvedValue(undefined)
+  updateModelChannelBindings: vi.fn().mockResolvedValue(undefined)
 }));
 
 import updateWithJsonApi from '@/pages/api/core/ai/model/updateWithJson';

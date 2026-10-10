@@ -1,6 +1,6 @@
 import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import { SimpleLRUCache } from '../../../common/cache/simpleLru';
-import { readModelCatalogRevision, readModelCatalogSnapshot } from './entity';
+import { readModelCatalogRevision, readModelCatalogSnapshot } from './catalog/entity';
 import { createModelHandle, type ModelHandle } from './handle';
 import { formatDbModelToRuntimeModel } from './runtime';
 import { withTimeout, delay } from '@fastgpt/global/common/system/utils';

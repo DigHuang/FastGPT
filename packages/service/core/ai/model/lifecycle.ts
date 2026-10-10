@@ -1,4 +1,4 @@
-import type { SystemModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
 import type {
   CreateModelResponse,
   UpdateModelBody
@@ -6,20 +6,26 @@ import type {
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { getLogger, LogCategories } from '../../../common/logger';
 import {
-  appendModelToChannels,
+  updateModelChannelBindings,
   removeModelsFromChannels,
   syncModelNameInChannels
 } from './channel/binding';
 import { importSystemModels } from './import';
-import { createModel, deleteModels, updateModel, restoreModelName } from './mutation';
+import {
+  createModel,
+  createModelsFromTemplates,
+  deleteModels,
+  updateModel,
+  restoreModelName
+} from './mutation';
 
 const logger = getLogger(LogCategories.MODULE.AI.MODEL);
 
 /**
  * 聚合创建模型与其渠道快捷绑定的通用生命周期服务。
  * 1. 调用 createModel 在 Mongo 中完成唯一性校验与事务落库；
- * 2. 若传入 channelIds，调用 appendModelToChannels 进行渠道快捷关联；
- * 3. 渠道绑定属于非强一致副作用，如果追加失败由底层记录日志并安全吞错，不破坏模型已创建成功的事实。
+ * 2. 若传入 channelIds，在所属桶内追加渠道关联；
+ * 3. 生命周期层决定绑定失败仅记录诊断，底层渠道操作仍保留真实错误。
  */
 export const createModelWithLifecycle = async ({
   modelData,
@@ -28,7 +34,7 @@ export const createModelWithLifecycle = async ({
   tmbId,
   teamId
 }: {
-  modelData: SystemModelDocumentDataType;
+  modelData: AIModelDocumentDataType;
   channelType: ChannelType;
   channelIds?: number[];
   tmbId?: string;
@@ -41,16 +47,57 @@ export const createModelWithLifecycle = async ({
     teamId
   });
 
-  if (channelIds && channelIds.length > 0) {
-    await appendModelToChannels({
-      channelIds,
-      model: modelData.model,
-      channelType,
-      tmbId: channelType === 'team' ? (tmbId ?? '') : ''
-    });
-  }
+  await bindCreatedModelsToChannels({ models: [modelData.model], channelIds, channelType, tmbId });
 
   return createResult;
+};
+
+/**
+ * 模板创建与普通创建共用提交后绑定策略。已安装模板也应绑定用户本次选择的渠道，
+ * 因而以请求模板集合为准，不能只使用 mutation 返回的新增模型列表。
+ */
+export const createModelsFromTemplatesWithLifecycle = async (
+  props: Parameters<typeof createModelsFromTemplates>[0]
+) => {
+  const result = await createModelsFromTemplates(props);
+  await bindCreatedModelsToChannels({
+    models: props.templates.map(({ model }) => model),
+    channelIds: props.channelIds,
+    channelType: props.channelType,
+    tmbId: props.tmbId
+  });
+  return result;
+};
+
+/** 创建已提交后尽力关联渠道；逐模型保留失败诊断，某项失败不阻断后续关联。 */
+const bindCreatedModelsToChannels = async ({
+  models,
+  channelIds,
+  channelType,
+  tmbId
+}: {
+  models: string[];
+  channelIds?: number[];
+  channelType: ChannelType;
+  tmbId?: string;
+}) => {
+  if (!channelIds?.length) return;
+  for (const model of new Set(models)) {
+    await updateModelChannelBindings({
+      model,
+      addChannelIds: channelIds,
+      channelType,
+      tmbId: tmbId ?? ''
+    }).catch((error) => {
+      logger.error('Append model to channels after creation failed', {
+        channelIds,
+        model,
+        channelType,
+        tmbId,
+        error
+      });
+    });
+  }
 };
 
 /**

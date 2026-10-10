@@ -2,10 +2,7 @@ import { getCachedSystemModelHandle } from '@fastgpt/service/core/ai/model/cache
 import { getModelTestDefaults, setModelTestSnapshot } from '@test/modelCache';
 import handler from '@/pages/api/core/app/version/publish';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import type {
-  RerankSystemModelDataType,
-  TTSSystemModelDataType
-} from '@fastgpt/global/core/ai/model/schema';
+import type { RerankModelDataType, TTSModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import {
@@ -33,14 +30,14 @@ describe('publish optional model defaults', () => {
     previousModels = getCachedSystemModelHandle()!.getActiveModels();
     previousDefaults = getModelTestDefaults();
     const llm = previousDefaults.llm!;
-    const rerank: RerankSystemModelDataType = {
+    const rerank: RerankModelDataType = {
       ...llm,
       modelId: 'default-rerank',
       model: 'rerank',
       type: ModelTypeEnum.rerank,
       config: {}
     };
-    const tts: TTSSystemModelDataType = {
+    const tts: TTSModelDataType = {
       ...llm,
       modelId: 'default-tts',
       model: 'tts',

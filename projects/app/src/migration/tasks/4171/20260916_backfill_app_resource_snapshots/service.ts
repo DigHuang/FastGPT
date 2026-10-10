@@ -24,7 +24,7 @@ import { MongoChatInputGuide } from '@fastgpt/service/core/chat/inputGuide/schem
 import { MongoAppChatLog } from '@fastgpt/service/core/app/logs/chatLogsSchema';
 import { filterAuthorizedAppResources } from '@fastgpt/service/support/permission/app/resource';
 import { getSystemModelHandle } from '@fastgpt/service/core/ai/model/index';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { parseLegacyMcpChildApps } from '@fastgpt/service/core/app/mcp';
 import { getMCPToolSetRuntimeNode } from '@fastgpt/global/core/app/tool/mcpTool/utils';
 
@@ -99,7 +99,7 @@ const isFolderApp = (type: unknown) =>
 /** 从历史工作流字段确定性生成资源快照。 */
 export const buildAppResourceSnapshot = (
   record: AppResourceMigrationRecord,
-  models: readonly SystemModelDataType[] = []
+  models: readonly AIModelDataType[] = []
 ) => {
   const storedNodes = Array.isArray(record.nodes)
     ? record.nodes
@@ -503,7 +503,7 @@ const updatePublishedVersionPointer = async ({
  */
 const createMissingPublishedVersion = async (
   record: AppResourceMigrationRecord,
-  models?: readonly SystemModelDataType[]
+  models?: readonly AIModelDataType[]
 ) => {
   const loadedModels = models ?? (await getSystemModelHandle()).getAllModels();
   return mongoSessionRun(async (session) => {

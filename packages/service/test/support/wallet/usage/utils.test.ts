@@ -1,14 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { formatModelChars2Points } from '@fastgpt/service/support/wallet/usage/utils';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 
 const createModel = (
-  data: Pick<SystemModelDataType, 'modelId' | 'name' | 'model'> &
-    Partial<
-      Pick<SystemModelDataType, 'charsPointsPrice' | 'inputPrice' | 'outputPrice' | 'priceTiers'>
-    >
-): SystemModelDataType => ({
+  data: Pick<AIModelDataType, 'modelId' | 'name' | 'model'> &
+    Partial<Pick<AIModelDataType, 'charsPointsPrice' | 'inputPrice' | 'outputPrice' | 'priceTiers'>>
+): AIModelDataType => ({
   ...data,
   type: ModelTypeEnum.llm,
   provider: 'test',
@@ -17,7 +15,7 @@ const createModel = (
   config: { maxContext: 1000, maxResponse: 100, quoteMaxToken: 500 }
 });
 
-const mockModels: Record<string, SystemModelDataType> = {
+const mockModels: Record<string, AIModelDataType> = {
   'gpt-4': createModel({
     modelId: '507f1f77bcf86cd799439021',
     name: 'GPT-4',

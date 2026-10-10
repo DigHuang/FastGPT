@@ -3,7 +3,7 @@ import {
   ReadPermissionVal
 } from '@fastgpt/global/support/permission/constant';
 import { isTeamModel } from '@fastgpt/global/core/ai/model/utils';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { hashStr } from '@fastgpt/global/common/string/tools';
 import { TmpDataEnum } from '@fastgpt/global/support/tmpData/constants';
 import { getTeamModelHandle } from '../../../core/ai/model/index';
@@ -27,7 +27,7 @@ export const getMemberModelCatalogPermission = async ({
   /** 仅供目录展示停用状态；执行权限调用仍保持 active 模型范围。 */
   includeInactive?: boolean;
   /** 调用方传入同一快照，避免权限计算期间混用目录版本。 */
-  catalogSnapshot?: { models: SystemModelDataType[]; version: string };
+  catalogSnapshot?: { models: AIModelDataType[]; version: string };
   hasManagePer?: boolean;
 }) => {
   const snapshot =

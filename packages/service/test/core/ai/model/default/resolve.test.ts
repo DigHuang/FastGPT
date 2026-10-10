@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { resolveEffectiveDefaultModelIds } from '../../../../../core/ai/model/default/resolve';
 
-const llm = (modelId: string, vision = false): SystemModelDataType => ({
+const llm = (modelId: string, vision = false): AIModelDataType => ({
   modelId,
   model: modelId,
   name: modelId,
@@ -14,7 +14,7 @@ const llm = (modelId: string, vision = false): SystemModelDataType => ({
   config: { maxContext: 4096, maxResponse: 1024, quoteMaxToken: 1024, vision }
 });
 
-const embedding = (modelId: string): SystemModelDataType => ({
+const embedding = (modelId: string): AIModelDataType => ({
   modelId,
   model: modelId,
   name: modelId,

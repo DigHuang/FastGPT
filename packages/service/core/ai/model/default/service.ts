@@ -1,10 +1,10 @@
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import type { ModelDefaultIds } from '@fastgpt/global/core/ai/model/default';
-import { runModelTransaction } from '../entity';
+import { runModelTransaction } from '../catalog/transaction';
 import { MongoAIModel } from '../schema';
 import { assertModelAvailable } from '../../utils';
-import { updatedReloadSystemModel } from '../catalog';
-import { upsertSystemDefaultModelIds } from './entity';
+import { updatedReloadSystemModel } from '../catalog/service';
+import { upsertSystemDefaultModelIds } from '../catalog/entity';
 
 /** 校验默认模型引用并提交配置，不接受失效或类型不匹配的引用。 */
 export const updateSystemDefaultModels = async (defaults: ModelDefaultIds): Promise<void> => {

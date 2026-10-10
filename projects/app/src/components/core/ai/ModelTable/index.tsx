@@ -235,6 +235,7 @@ const ModelTable = ({
                       <ModelScopeCell
                         modelId={item.modelId}
                         scope={item.scope}
+                        ownerTmbId={'tmbId' in item ? item.tmbId : undefined}
                         hasManagePer={userInfo?.team.permission.hasManagePer}
                         selectedHint={modelPermissionConfigHint}
                       />

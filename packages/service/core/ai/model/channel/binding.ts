@@ -199,31 +199,3 @@ export const removeModelsFromChannels = async ({
     })
   );
 };
-
-/** 将模型追加到指定渠道列表中（用于创建模型时的快捷关联）。 */
-export const appendModelToChannels = async ({
-  channelIds,
-  model,
-  channelType,
-  tmbId
-}: {
-  channelIds: number[];
-  model: string;
-  channelType: ChannelType;
-  tmbId: string;
-}): Promise<void> => {
-  if (channelIds.length === 0) return;
-
-  try {
-    await updateModelChannelBindings({ model, addChannelIds: channelIds, channelType, tmbId });
-  } catch (error) {
-    // 渠道追加失败属于非致命副作用，不破坏模型本身已创建成功的事实
-    logger.error('Append model to channels after creation failed', {
-      channelIds,
-      model,
-      channelType,
-      tmbId,
-      error
-    });
-  }
-};

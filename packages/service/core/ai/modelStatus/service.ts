@@ -8,7 +8,7 @@ import {
   ModelStatusProbeStatusEnum,
   type ModelStatusProbeStatus
 } from '@fastgpt/global/core/ai/model/status';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import type {
   GetModelStatusResponse,
   ModelStatusProbeConfigResponse,
@@ -241,7 +241,7 @@ const getModelStatusItem = ({
   model,
   records
 }: {
-  model: SystemModelDataType;
+  model: AIModelDataType;
   records: ModelStatusProbeRecordType[];
 }): ModelStatusProbeModel => {
   const latest = records.at(-1);
@@ -273,7 +273,7 @@ const getModelStatusItem = ({
  */
 export const getModelStatus = async (): Promise<GetModelStatusResponse> => {
   const [config, modelHandle] = await Promise.all([getStoredConfig(), getSystemModelHandle()]);
-  const models = [...modelHandle.getActiveModels()] as SystemModelDataType[];
+  const models = [...modelHandle.getActiveModels()] as AIModelDataType[];
   const modelIds = models.map((model) => model.modelId);
   const since = new Date(Date.now() - MODEL_STATUS_WINDOW_MS);
   const records = modelIds.length
@@ -326,7 +326,7 @@ export const probeModelStatus = async ({
   signal,
   test = testModelConnection
 }: {
-  model: SystemModelDataType;
+  model: AIModelDataType;
   teamId?: string;
   signal?: AbortSignal;
   test?: typeof testModelConnection;
@@ -651,9 +651,9 @@ export const testModelStatusWebhook = async (
       ? input.webhookToken
       : config.webhookToken;
 
-  const activeModels = [...modelHandle.getActiveModels()] as SystemModelDataType[];
+  const activeModels = [...modelHandle.getActiveModels()] as AIModelDataType[];
   const sampleModel =
-    activeModels[0] || (modelHandle.getAllModels()[0] as SystemModelDataType | undefined);
+    activeModels[0] || (modelHandle.getAllModels()[0] as AIModelDataType | undefined);
 
   const modelInfo = sampleModel
     ? {

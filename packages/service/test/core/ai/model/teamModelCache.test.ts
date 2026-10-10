@@ -3,8 +3,8 @@ import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants
 import { Types } from '@fastgpt/service/common/mongo';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
-import { runModelTransaction } from '@fastgpt/service/core/ai/model/entity';
+import { MongoAIModelCatalog } from '@fastgpt/service/core/ai/model/catalog/schema';
+import { runModelTransaction } from '@fastgpt/service/core/ai/model/catalog/transaction';
 import { createModelHandle } from '@fastgpt/service/core/ai/model/handle';
 import {
   getScopedTeamModelHandle,
@@ -39,7 +39,7 @@ const systemHandle = createModelHandle({
 });
 
 beforeEach(async () => {
-  await Promise.all([MongoAIModel.deleteMany({}), MongoAIDefaultModel.deleteMany({})]);
+  await Promise.all([MongoAIModel.deleteMany({}), MongoAIModelCatalog.deleteMany({})]);
   clearTeamModelCatalogCache();
 });
 

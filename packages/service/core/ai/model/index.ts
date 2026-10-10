@@ -1,7 +1,7 @@
 import { getCachedSystemModelHandle } from './cache';
 import type { ModelHandle } from './handle';
 import { getScopedTeamModelHandle } from './teamModelCache';
-import { refreshModelHandle } from './catalog';
+import { refreshModelHandle } from './catalog/service';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { UserError } from '@fastgpt/global/common/error/utils';
 

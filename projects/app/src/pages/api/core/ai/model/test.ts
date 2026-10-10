@@ -14,7 +14,7 @@ import {
   type TestModelQuery
 } from '@fastgpt/global/openapi/core/ai/model/api';
 import { isTeamModel, channelTypeToScope } from '@fastgpt/global/core/ai/model/utils';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 
 const logger = getLogger(LogCategories.MODULE.AI.MODEL);
 
@@ -37,10 +37,10 @@ async function handleDraftTest(req: ApiRequestProps<TestDraftModelBody>): Promis
     requestUrl: undefined,
     requestAuth: undefined,
     scope: channelTypeToScope(channelType)
-  } as SystemModelDataType;
+  } as AIModelDataType;
 
   const isTeam = isTeamModel(draftModel);
-  const authResult = await authModelInstanceAccess({ req, model: draftModel, isTeam });
+  const authResult = await authModelInstanceAccess({ req, model: draftModel });
 
   // 草稿或未带归属的团队模型测试时，归属回退为当前成员，保证请求落在成员自己的渠道桶
   if (isTeam) {

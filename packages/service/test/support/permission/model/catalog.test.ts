@@ -7,7 +7,7 @@ import {
   ReadPermissionVal
 } from '@fastgpt/global/support/permission/constant';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
+import { MongoAIModelCatalog } from '@fastgpt/service/core/ai/model/catalog/schema';
 import {
   createModel,
   updateModel,
@@ -56,7 +56,7 @@ const grant = (modelId: string, memberId: string) =>
 beforeEach(async () => {
   await Promise.all([
     MongoAIModel.deleteMany({}),
-    MongoAIDefaultModel.deleteMany({}),
+    MongoAIModelCatalog.deleteMany({}),
     MongoResourcePermission.deleteMany({}),
     MongoTmpData.deleteMany({})
   ]);

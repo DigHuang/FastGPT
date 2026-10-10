@@ -5,10 +5,11 @@ import {
   normalizeModelPricingForSave
 } from '@fastgpt/global/core/ai/model/pricing';
 import { type ParsedSystemModelsWithJsonBody } from '@fastgpt/global/openapi/core/ai/model/api';
-import { runModelTransaction, deleteModelRecords } from './entity';
+import { runModelTransaction } from './catalog/transaction';
+import { deleteModelRecords } from './cleanup';
 import { MongoAIModel } from './schema';
-import { updatedReloadSystemModel } from './catalog';
-import { getSystemModelConfigUpdate } from './utils';
+import { updatedReloadSystemModel } from './catalog/service';
+import { getModelConfigUpdate } from './utils';
 
 /**
  * 用导入配置替换系统模型集合，保留可匹配实例的稳定 ID，并在同一事务内清理派生权限与探测记录。
@@ -115,7 +116,7 @@ export const importSystemModels = async ({ config }: ParsedSystemModelsWithJsonB
             filter: isExistingModel
               ? { _id: modelId, scope: ModelScopeEnum.system }
               : { scope: ModelScopeEnum.system, model },
-            update: isExistingModel ? getSystemModelConfigUpdate(modelData) : { $set: modelData },
+            update: isExistingModel ? getModelConfigUpdate(modelData) : { $set: modelData },
             upsert: !isExistingModel
           }
         })),

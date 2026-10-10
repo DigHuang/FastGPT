@@ -1,7 +1,7 @@
 import { testModel, testDraftModel } from '@/web/core/ai/model/api';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import type { SystemModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
 import type { ModelChannelSummary } from '@fastgpt/global/openapi/core/ai/model/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { useToast } from '@fastgpt/web/hooks/useToast';
@@ -10,7 +10,7 @@ import { useRef, useState } from 'react';
 import { prepareDraftModelForTest } from './submit';
 
 type ModelChannelTestTarget =
-  | { source: 'draft'; getModelData: () => SystemModelDocumentDataType | undefined }
+  | { source: 'draft'; getModelData: () => AIModelDocumentDataType | undefined }
   | { source: 'installed'; modelId: string; model: string };
 
 /**

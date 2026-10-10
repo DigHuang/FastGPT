@@ -1,33 +1,33 @@
-import type { SystemDefaultModelType } from '../type';
-import { getModelProviderMetadata, preloadModelProviders } from './provider/controller';
+import type { SystemDefaultModelType } from '../../type';
+import { getModelProviderMetadata, preloadModelProviders } from '../provider/controller';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import {
-  type EmbeddingSystemModelDataType,
-  type LLMSystemModelDataType,
-  type RerankSystemModelDataType,
-  type STTSystemModelDataType,
-  type TTSSystemModelDataType,
-  type SystemModelDataType
+  type EmbeddingModelDataType,
+  type LLMModelDataType,
+  type RerankModelDataType,
+  type STTModelDataType,
+  type TTSModelDataType,
+  type AIModelDataType
 } from '@fastgpt/global/core/ai/model/schema';
-import { getLogger, LogCategories } from '../../../common/logger';
+import { getLogger, LogCategories } from '../../../../common/logger';
 import { hashStr } from '@fastgpt/global/common/string/tools';
 import { readModelCatalogSnapshot, readModelCatalogRevision } from './entity';
 import { withTimeout } from '@fastgpt/global/common/system/utils';
-import { createModelHandle } from './handle';
-import { getCachedSystemModelHandle, publishSystemModelHandle } from './cache';
-import { desensitizeSystemModel } from './transform';
-import { formatDbModelToRuntimeModel } from './runtime';
-import { resolveEffectiveDefaultModelIds } from './default/resolve';
+import { createModelHandle } from '../handle';
+import { getCachedSystemModelHandle, publishSystemModelHandle } from '../cache';
+import { desensitizeModel } from '../transform';
+import { formatDbModelToRuntimeModel } from '../runtime';
+import { resolveEffectiveDefaultModelIds } from '../default/resolve';
 
 /**
  * 只读取数据库安装实例并原子发布运行时模型快照，不执行插件请求、历史迁移或自动预装。
  */
 const publishInstalledModels = async ({ language = 'en' }: { language?: string } = {}) => {
-  const _systemModelList: SystemModelDataType[] = [];
-  const _systemModelMap = new Map<string, SystemModelDataType>();
+  const _systemModelList: AIModelDataType[] = [];
+  const _systemModelMap = new Map<string, AIModelDataType>();
   const _systemDefaultModel: SystemDefaultModelType = {};
 
-  const pushModel = (modelData: SystemModelDataType) => {
+  const pushModel = (modelData: AIModelDataType) => {
     _systemModelList.push(modelData);
     _systemModelMap.set(`id:${modelData.modelId}`, modelData);
     _systemModelMap.set(`model:${modelData.model}`, modelData);
@@ -51,9 +51,9 @@ const publishInstalledModels = async ({ language = 'en' }: { language?: string }
       models: _systemActiveModelList,
       configuredDefaults: configuredDefaultModelIds
     });
-    const resolveModel = <T extends SystemModelDataType>(
+    const resolveModel = <T extends AIModelDataType>(
       slot: keyof typeof effectiveDefaults,
-      predicate: (model: SystemModelDataType) => model is T
+      predicate: (model: AIModelDataType) => model is T
     ) => {
       const id = effectiveDefaults[slot];
       const model = id ? _systemModelMap.get('id:' + id) : undefined;
@@ -61,35 +61,35 @@ const publishInstalledModels = async ({ language = 'en' }: { language?: string }
     };
     _systemDefaultModel.llm = resolveModel(
       ModelTypeEnum.llm,
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+      (model): model is LLMModelDataType => model.type === ModelTypeEnum.llm
     );
     _systemDefaultModel.datasetTextLLM = resolveModel(
       'datasetTextLLM',
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+      (model): model is LLMModelDataType => model.type === ModelTypeEnum.llm
     );
     _systemDefaultModel.datasetImageLLM = resolveModel(
       'datasetImageLLM',
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+      (model): model is LLMModelDataType => model.type === ModelTypeEnum.llm
     );
     _systemDefaultModel.chatTitleLLM = resolveModel(
       'chatTitleLLM',
-      (model): model is LLMSystemModelDataType => model.type === ModelTypeEnum.llm
+      (model): model is LLMModelDataType => model.type === ModelTypeEnum.llm
     );
     _systemDefaultModel.embedding = resolveModel(
       ModelTypeEnum.embedding,
-      (model): model is EmbeddingSystemModelDataType => model.type === ModelTypeEnum.embedding
+      (model): model is EmbeddingModelDataType => model.type === ModelTypeEnum.embedding
     );
     _systemDefaultModel.tts = resolveModel(
       ModelTypeEnum.tts,
-      (model): model is TTSSystemModelDataType => model.type === ModelTypeEnum.tts
+      (model): model is TTSModelDataType => model.type === ModelTypeEnum.tts
     );
     _systemDefaultModel.stt = resolveModel(
       ModelTypeEnum.stt,
-      (model): model is STTSystemModelDataType => model.type === ModelTypeEnum.stt
+      (model): model is STTModelDataType => model.type === ModelTypeEnum.stt
     );
     _systemDefaultModel.rerank = resolveModel(
       ModelTypeEnum.rerank,
-      (model): model is RerankSystemModelDataType => model.type === ModelTypeEnum.rerank
+      (model): model is RerankModelDataType => model.type === ModelTypeEnum.rerank
     );
 
     // 完整目录与内容版本一起发布，不暴露多次赋值的半成品。
@@ -98,7 +98,7 @@ const publishInstalledModels = async ({ language = 'en' }: { language?: string }
         JSON.stringify({
           schemaVersion: 1,
           // 模型顺序属于目录内容；安装实例变化后必须触发客户端缓存更新。
-          models: _systemActiveModelList.map(desensitizeSystemModel),
+          models: _systemActiveModelList.map(desensitizeModel),
           providers: getModelProviderMetadata().providers,
           defaultModelIds: configuredDefaultModelIds
         })

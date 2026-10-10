@@ -1,7 +1,7 @@
 import { getCachedSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 import { getModelTestMap, setModelTestMap } from '@test/modelCache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import {
   getDatasetSearchVlmModel,
@@ -22,7 +22,7 @@ const findFirstDatasetSearchVlmModel = (input: Parameters<typeof resolveModels>[
 
 describe('dataset search VLM selection', () => {
   let originalMap: ReturnType<typeof getModelTestMap>;
-  const activeModel: SystemModelDataType = {
+  const activeModel: AIModelDataType = {
     modelId: 'active-id',
     model: 'active-vision',
     name: 'Active vision',

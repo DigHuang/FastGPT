@@ -15,7 +15,7 @@ import { AppErrEnum } from '@fastgpt/global/common/error/code/app';
 import { isInteractiveNodeType } from '@fastgpt/global/core/workflow/node/constant';
 import { MongoTransactionConflictError } from '../../../common/mongo/sessionRun';
 import { getTeamModelHandle } from '../../ai/model/index';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 
 type VersionResourceSource = Pick<AppVersionSchemaType, 'nodes' | 'chatConfig' | 'resources'> & {
   resourceRefs?: unknown;
@@ -32,7 +32,7 @@ const getVersionResourceSnapshot = (
   version: VersionResourceSource,
   nodes = version.nodes,
   chatConfig = version.chatConfig,
-  models: readonly SystemModelDataType[] = []
+  models: readonly AIModelDataType[] = []
 ): AppResourcesType =>
   resolveStoredAppResources({
     resources: version.resources,
@@ -74,7 +74,7 @@ const normalizeStoredVersionWorkflow = (
  */
 export const normalizeAppVersionWorkflow = (
   version: AppVersionSchemaType,
-  models: readonly SystemModelDataType[] = []
+  models: readonly AIModelDataType[] = []
 ): AppVersionWorkflow => {
   // 历史版本只迁移该版本自身的系统配置节点，不继承当前应用 chatConfig，
   // 避免当前配置占位导致该版本中的欢迎语、定时任务等旧值被丢弃。
@@ -126,7 +126,7 @@ const loadApp = async (appId: string, app?: AppVersionLookupApp) =>
  */
 const normalizeLegacyAppWorkflow = (
   app?: AppVersionLookupApp | null,
-  models: readonly SystemModelDataType[] = []
+  models: readonly AIModelDataType[] = []
 ): AppVersionWorkflow => {
   if (!app) return emptyVersionWorkflow();
 

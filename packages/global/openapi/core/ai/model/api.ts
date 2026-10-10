@@ -1,18 +1,18 @@
 import { ModelScopeEnum, ModelTypeEnum } from '../../../../core/ai/constants';
 import {
   EmbeddingModelConfigSchema,
-  EmbeddingSystemModelDocumentSchema,
+  EmbeddingModelDocumentSchema,
   LLMModelConfigSchema,
-  LLMSystemModelDocumentSchema,
+  LLMModelDocumentSchema,
   ModelPriceTierSchema,
   RerankModelConfigSchema,
-  RerankSystemModelDocumentSchema,
+  RerankModelDocumentSchema,
   STTModelConfigSchema,
-  STTSystemModelDocumentSchema,
-  SystemModelDataSchema,
-  SystemModelDocumentDataSchema,
+  STTModelDocumentSchema,
+  AIModelDataSchema,
+  AIModelDocumentDataSchema,
   TTSModelConfigSchema,
-  TTSSystemModelDocumentSchema
+  TTSModelDocumentSchema
 } from '../../../../core/ai/model/schema';
 import z from 'zod';
 import { IntSchema } from '../../../../common/zod';
@@ -204,7 +204,7 @@ export const GetSystemModelsResponseSchema = z.object({
 export type GetSystemModelsResponse = z.infer<typeof GetSystemModelsResponseSchema>;
 
 /* GET /api/core/ai/model/config?channelType=team */
-export const ModelConfigListItemSchema = SystemModelDataSchema.and(
+export const ModelConfigListItemSchema = AIModelDataSchema.and(
   z.object({
     channels: z.array(ModelChannelSummarySchema).meta({ description: '当前模型关联的渠道摘要' })
   })
@@ -268,7 +268,7 @@ export const ModelDetailChannelSchema = ModelChannelSummarySchema.extend({
 export type ModelDetailChannel = z.infer<typeof ModelDetailChannelSchema>;
 
 export const GetModelDetailResponseSchema = z.object({
-  model: SystemModelDataSchema.meta({ description: '完整模型参数' }),
+  model: AIModelDataSchema.meta({ description: '完整模型参数' }),
   channels: z.array(ModelDetailChannelSchema).meta({
     description: '全部渠道展示信息及其与当前模型的关联状态'
   })
@@ -293,11 +293,11 @@ const TestModelPriceFields = {
 
 export const TestDraftModelDataSchema = z
   .discriminatedUnion('type', [
-    LLMSystemModelDocumentSchema.omit(TestModelPriceFields),
-    EmbeddingSystemModelDocumentSchema.omit(TestModelPriceFields),
-    TTSSystemModelDocumentSchema.omit(TestModelPriceFields),
-    STTSystemModelDocumentSchema.omit(TestModelPriceFields),
-    RerankSystemModelDocumentSchema.omit(TestModelPriceFields)
+    LLMModelDocumentSchema.omit(TestModelPriceFields),
+    EmbeddingModelDocumentSchema.omit(TestModelPriceFields),
+    TTSModelDocumentSchema.omit(TestModelPriceFields),
+    STTModelDocumentSchema.omit(TestModelPriceFields),
+    RerankModelDocumentSchema.omit(TestModelPriceFields)
   ])
   .meta({ description: '仅包含实际模型调用所需字段的表单草稿；计费字段会被忽略' });
 
@@ -345,7 +345,7 @@ export const GetModelTemplatesQuerySchema = z.object({
 export type GetModelTemplatesQuery = z.infer<typeof GetModelTemplatesQuerySchema>;
 
 export const GetModelTemplatesResponseSchema = z.object({
-  models: z.array(SystemModelDocumentDataSchema).meta({ description: '当前 Plugin 模型模板' }),
+  models: z.array(AIModelDocumentDataSchema).meta({ description: '当前 Plugin 模型模板' }),
   providers: z.array(ModelProviderSchema).meta({ description: '模型提供商元数据' })
 });
 export type GetModelTemplatesResponse = z.infer<typeof GetModelTemplatesResponseSchema>;
@@ -367,7 +367,7 @@ export type UpdateModelChannelsBody = z.infer<typeof UpdateModelChannelsBodySche
 
 /* POST /api/core/ai/model/create */
 export const CreateModelBodySchema = z.object({
-  modelData: SystemModelDocumentDataSchema.meta({
+  modelData: AIModelDocumentDataSchema.meta({
     description: '完整模型配置；未声明字段会被忽略，modelId 始终由服务端生成'
   }),
   channelType: ModelChannelTypeSchema,
@@ -433,11 +433,11 @@ const UpdateModelField = {
 
 export const UpdateModelDataSchema = z
   .discriminatedUnion('type', [
-    LLMSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
-    EmbeddingSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
-    TTSSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
-    STTSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
-    RerankSystemModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField)
+    LLMModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    EmbeddingModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    TTSModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    STTModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField),
+    RerankModelDocumentSchema.omit({ tmbId: true, teamId: true }).extend(UpdateModelField)
   ])
   .meta({
     description: '模型可编辑参数；model 为可选更新，type 仅用于分支校验不参与类型变更'
@@ -510,14 +510,14 @@ const ImportedModelIdField = {
 };
 
 export const ImportedSystemModelSchema = z.discriminatedUnion('type', [
-  LLMSystemModelDocumentSchema.extend({ ...ImportedModelIdField, config: LLMModelConfigSchema }),
-  EmbeddingSystemModelDocumentSchema.extend({
+  LLMModelDocumentSchema.extend({ ...ImportedModelIdField, config: LLMModelConfigSchema }),
+  EmbeddingModelDocumentSchema.extend({
     ...ImportedModelIdField,
     config: EmbeddingModelConfigSchema
   }),
-  TTSSystemModelDocumentSchema.extend({ ...ImportedModelIdField, config: TTSModelConfigSchema }),
-  STTSystemModelDocumentSchema.extend({ ...ImportedModelIdField, config: STTModelConfigSchema }),
-  RerankSystemModelDocumentSchema.extend({
+  TTSModelDocumentSchema.extend({ ...ImportedModelIdField, config: TTSModelConfigSchema }),
+  STTModelDocumentSchema.extend({ ...ImportedModelIdField, config: STTModelConfigSchema }),
+  RerankModelDocumentSchema.extend({
     ...ImportedModelIdField,
     config: RerankModelConfigSchema
   })

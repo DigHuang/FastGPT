@@ -1,8 +1,8 @@
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import {
-  SystemModelDataSchema,
-  SystemModelDocumentDataSchema,
-  type SystemModelDataType
+  AIModelDataSchema,
+  AIModelDocumentDataSchema,
+  type AIModelDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import { defaultProvider } from '@fastgpt/global/core/ai/model/provider';
 import { getRuntimeResolvedPriceTiers } from '@fastgpt/global/core/ai/model/pricing';
@@ -16,8 +16,8 @@ import { getModelProvider } from './provider/controller';
 export const formatDbModelToRuntimeModel = (
   dbModel: Record<string, unknown>,
   options: { language?: string; fallbackProvider?: boolean } = {}
-): SystemModelDataType => {
-  const dbDocument = SystemModelDocumentDataSchema.parse(dbModel);
+): AIModelDataType => {
+  const dbDocument = AIModelDocumentDataSchema.parse(dbModel);
   const provider = (() => {
     try {
       return getModelProvider(dbDocument.provider, options.language ?? 'en');
@@ -27,7 +27,7 @@ export const formatDbModelToRuntimeModel = (
     }
   })();
 
-  const runtimeModel = SystemModelDataSchema.parse({
+  const runtimeModel = AIModelDataSchema.parse({
     ...dbDocument,
     modelId: String(dbModel._id),
     provider: provider.id,

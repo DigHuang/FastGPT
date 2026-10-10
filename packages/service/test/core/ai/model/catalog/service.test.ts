@@ -1,3 +1,4 @@
+import { runModelTransaction } from '@fastgpt/service/core/ai/model/catalog/transaction';
 import {
   getCachedSystemModelHandle,
   publishSystemModelHandle
@@ -41,15 +42,15 @@ vi.mock('@fastgpt/global/common/system/utils', async (importOriginal) => ({
 }));
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
 import { preloadModelProviders } from '@fastgpt/service/core/ai/model/provider/controller';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
-import * as modelEntity from '@fastgpt/service/core/ai/model/entity';
+import { MongoAIModelCatalog } from '@fastgpt/service/core/ai/model/catalog/schema';
+import * as modelEntity from '@fastgpt/service/core/ai/model/catalog/entity';
 
 import {
   loadInstalledModels,
   loadSystemModels,
   refreshModelHandle,
   updatedReloadSystemModel
-} from '@fastgpt/service/core/ai/model/catalog';
+} from '@fastgpt/service/core/ai/model/catalog/service';
 
 const pluginLlmDocument = {
   type: ModelTypeEnum.llm,
@@ -67,7 +68,7 @@ describe('loadSystemModels', () => {
     vi.mocked(preloadModelProviders).mockReset().mockResolvedValue(undefined);
     reloadMocks.updateFastGPTConfigBuffer.mockReset().mockResolvedValue(undefined);
     reloadMocks.delay.mockReset().mockResolvedValue(undefined);
-    await Promise.all([MongoAIModel.deleteMany({}), MongoAIDefaultModel.deleteMany({})]);
+    await Promise.all([MongoAIModel.deleteMany({}), MongoAIModelCatalog.deleteMany({})]);
     publishSystemModelHandle(undefined);
   });
 
@@ -220,7 +221,7 @@ describe('loadSystemModels', () => {
       isActive: true,
       config: { maxContext: 32000, maxResponse: 16000, quoteMaxToken: 24000 }
     });
-    await MongoAIDefaultModel.create({
+    await MongoAIModelCatalog.create({
       scope: 'system',
       defaultModelIds: { llm: String(model._id) }
     });
@@ -260,7 +261,7 @@ describe('loadSystemModels', () => {
 
 describe('refreshModelHandle', () => {
   beforeEach(async () => {
-    await Promise.all([MongoAIModel.deleteMany({}), MongoAIDefaultModel.deleteMany({})]);
+    await Promise.all([MongoAIModel.deleteMany({}), MongoAIModelCatalog.deleteMany({})]);
     publishSystemModelHandle(undefined);
   });
 
@@ -271,7 +272,7 @@ describe('refreshModelHandle', () => {
 
   it('loads the committed revision and its model configuration before resolving', async () => {
     await MongoAIModel.create(pluginLlmDocument);
-    await MongoAIDefaultModel.create({ scope: 'system', catalogRevision: 2 });
+    await MongoAIModelCatalog.create({ scope: 'system', catalogRevision: 2 });
     setModelTestSnapshot({ revision: 1 });
 
     await refreshModelHandle();
@@ -282,7 +283,7 @@ describe('refreshModelHandle', () => {
 
   it('keeps the current snapshot when its revision is already current', async () => {
     await MongoAIModel.create(pluginLlmDocument);
-    await MongoAIDefaultModel.create({ scope: 'system', catalogRevision: 2 });
+    await MongoAIModelCatalog.create({ scope: 'system', catalogRevision: 2 });
     await loadInstalledModels();
     const snapshot = getCachedSystemModelHandle()?.getAllModels();
 
@@ -294,7 +295,7 @@ describe('refreshModelHandle', () => {
 
   it('reloads again when an in-flight snapshot predates the revision required by the read barrier', async () => {
     await MongoAIModel.create(pluginLlmDocument);
-    await MongoAIDefaultModel.create({ scope: 'system', catalogRevision: 1 });
+    await MongoAIModelCatalog.create({ scope: 'system', catalogRevision: 1 });
     const oldSnapshot = await modelEntity.readModelCatalogSnapshot({
       scope: ModelScopeEnum.system
     });
@@ -310,7 +311,7 @@ describe('refreshModelHandle', () => {
       });
     const inFlightLoad = loadInstalledModels();
 
-    await modelEntity.runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
+    await runModelTransaction({ scope: ModelScopeEnum.system }, async (session) => {
       await MongoAIModel.updateOne(
         { model: 'plugin-llm' },
         { $set: { name: 'Revision two model' } },
@@ -343,10 +344,10 @@ describe('refreshModelHandle', () => {
 
   it('uses the local snapshot after a reload failure without publishing a new revision', async () => {
     await MongoAIModel.create(pluginLlmDocument);
-    await MongoAIDefaultModel.create({ scope: 'system', catalogRevision: 1 });
+    await MongoAIModelCatalog.create({ scope: 'system', catalogRevision: 1 });
     await loadInstalledModels();
     const snapshot = getCachedSystemModelHandle()?.getAllModels();
-    await MongoAIDefaultModel.updateOne({ scope: 'system' }, { $inc: { catalogRevision: 1 } });
+    await MongoAIModelCatalog.updateOne({ scope: 'system' }, { $inc: { catalogRevision: 1 } });
     // 持久化的不合法类型使真实目录解析失败，而不是伪造加载器的行为。
     await MongoAIModel.updateOne({ model: 'plugin-llm' }, { $set: { type: 'invalid' } });
 
@@ -431,7 +432,7 @@ describe('refreshModelHandle', () => {
   });
 
   it('does not fail an already committed write and retries at the next read barrier', async () => {
-    await MongoAIDefaultModel.create({ scope: 'system', catalogRevision: 1 });
+    await MongoAIModelCatalog.create({ scope: 'system', catalogRevision: 1 });
     await MongoAIModel.create({ ...pluginLlmDocument, type: 'invalid' });
 
     await expect(updatedReloadSystemModel()).resolves.toBeUndefined();

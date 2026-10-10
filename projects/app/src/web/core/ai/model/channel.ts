@@ -1,10 +1,8 @@
 import { GET, POST, PUT, DELETE } from '@/web/common/api/request';
-import {
-  type ChannelConfig,
-  type ChannelStatusType,
-  REASONING_FIELD_MAPPING_CHANNEL_TYPES
-} from '@fastgpt/global/core/ai/model/channel';
+import { type ChannelStatusType } from '@fastgpt/global/core/ai/model/channel';
 import type {
+  CreateChannelBody,
+  CreateChannelResponse,
   UpdateChannelBody,
   GetChannelLogsQuery,
   GetChannelDashboardQuery,
@@ -21,8 +19,6 @@ import type {
   ProviderMetasResponse
 } from '@fastgpt/global/openapi/core/ai/model/channel/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
-
-const reasoningFieldMappingChannelTypes = new Set<number>(REASONING_FIELD_MAPPING_CHANNEL_TYPES);
 
 const channelBasePath = '/core/ai/model/channel';
 
@@ -84,26 +80,8 @@ export const getChannelProviders = () =>
   GET<ProviderMetasResponse>(`${channelBasePath}/providerMetas`);
 
 /** FastGPT 渠道创建入口，重名校验由服务端统一执行 */
-export const postCreateChannel = async (
-  data: ChannelConfig & { channelType: ChannelType; priority?: number }
-): Promise<void> => {
-  const channelType = data.channelType;
-  const name = data.name.trim();
-
-  return await POST<void>(`${channelBasePath}/create`, {
-    channelType,
-    type: data.type,
-    name,
-    base_url: data.base_url,
-    models: data.models,
-    model_mapping: data.model_mapping,
-    configs: reasoningFieldMappingChannelTypes.has(data.type)
-      ? { map_reasoning_to_reasoning_content: true }
-      : undefined,
-    key: data.key ?? '',
-    priority: data.priority ?? 1
-  });
-};
+export const postCreateChannel = (data: CreateChannelBody): Promise<CreateChannelResponse> =>
+  POST<CreateChannelResponse>(`${channelBasePath}/create`, data);
 
 /** 更新单个渠道启用/禁用状态 */
 export const putChannelStatus = (id: number, status: ChannelStatusType, channelType: ChannelType) =>

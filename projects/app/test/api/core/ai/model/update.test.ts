@@ -12,17 +12,18 @@ const configMocks = vi.hoisted(() => ({
 const providerMocks = vi.hoisted(() => ({ preloadModelProviders: vi.fn() }));
 const channelMocks = vi.hoisted(() => ({
   syncModelNameInChannels: vi.fn(),
-  appendModelToChannels: vi.fn()
+  updateModelChannelBindings: vi.fn()
 }));
 
 vi.mock('@fastgpt/service/core/ai/model/channel/binding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@fastgpt/service/core/ai/model/channel/binding')>()),
   syncModelNameInChannels: channelMocks.syncModelNameInChannels,
-  appendModelToChannels: channelMocks.appendModelToChannels
+  updateModelChannelBindings: channelMocks.updateModelChannelBindings
 }));
 
-vi.mock('@fastgpt/service/core/ai/model/catalog', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@fastgpt/service/core/ai/model/catalog')>();
+vi.mock('@fastgpt/service/core/ai/model/catalog/service', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@fastgpt/service/core/ai/model/catalog/service')>();
 
   return {
     ...actual,
@@ -94,7 +95,7 @@ describe('admin settings model create/update api', () => {
       global.ModelProviderRawCache = [];
     });
     channelMocks.syncModelNameInChannels.mockReset().mockResolvedValue(undefined);
-    channelMocks.appendModelToChannels.mockReset().mockResolvedValue(undefined);
+    channelMocks.updateModelChannelBindings.mockReset().mockResolvedValue(undefined);
   });
 
   it('creates a custom model through the dedicated create endpoint', async () => {

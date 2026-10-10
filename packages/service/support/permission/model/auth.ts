@@ -1,52 +1,18 @@
-import { PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
-import type { TeamPermission } from '@fastgpt/global/support/permission/user/controller';
-import { ModelPermission } from '@fastgpt/global/support/permission/model/controller';
+import {
+  assertMemberModelPermission,
+  assertTeamModelEnabled,
+  assertModelInstancePolicy,
+  type ModelInstanceOwner
+} from './policy';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { UserError } from '@fastgpt/global/common/error/utils';
-import {
-  isSystemModel,
-  isTeamModel,
-  scopeToChannelType
-} from '@fastgpt/global/core/ai/model/utils';
-import type { SystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import { isTeamModel, scopeToChannelType } from '@fastgpt/global/core/ai/model/utils';
+import type { AIModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import { getTeamModelHandle } from '../../../core/ai/model/index';
-import { SystemErrEnum } from '@fastgpt/global/common/error/code/system';
-import { isProVersion } from '../../../common/system/constants';
-import { authSystemAdmin, authUserPer } from '../user/auth';
-import { getTmbPermission } from '../controller';
+import { authUserPer } from '../user/auth';
 import { getMemberModelIds } from './catalog';
 import type { AuthModeType } from '../type';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
-
-/**
- * 校验成员是否拥有模型/渠道管理权限（TeamModelCreatePermission）。
- * 模型与渠道共用同一权限位，仅错误码按资源区分，便于前端提示。
- */
-export const assertMemberModelPermission = (
-  tmbPer: TeamPermission,
-  resource: 'model' | 'channel' = 'model'
-): Promise<void> => {
-  if (!tmbPer.hasModelCreatePer) {
-    return Promise.reject(
-      resource === 'channel' ? ModelErrEnum.unAuthChannel : ModelErrEnum.unAuthModel
-    );
-  }
-  return Promise.resolve();
-};
-
-/**
- * 团队模型/渠道是商业版能力且受功能清单开关控制：
- * 1. 开源版拒绝访问（commercialFeature）
- * 2. 管理员未开启团队模型功能时拒绝访问（teamModelDisabled）
- * system 作用域是各版本共有的管理员能力，不经过这里。
- */
-export const assertTeamModelEnabled = (): Promise<void> => {
-  if (!isProVersion()) return Promise.reject(SystemErrEnum.commercialFeature);
-  if (global.feConfigs?.enable_team_model === false) {
-    return Promise.reject(ModelErrEnum.teamModelDisabled);
-  }
-  return Promise.resolve();
-};
 
 /**
  * 模型/渠道接口的作用域鉴权守卫（不含成员管理权限，权限校验见 authModelManage）：
@@ -93,7 +59,7 @@ export const authModelManage = async ({
 };
 
 /**
- * 按具体模型实例鉴权（详情读取、连通性测试等针对单个模型的接口）：
+ * 草稿模型预览鉴权；已安装模型入口通过 authAndGetModelInstance 使用同一策略：
  * - team 模型：需要登录成员；非 root 还需 hasModelCreatePer。模型已有归属时只允许归属成员访问，
  *   即使是 root 也不能越权读取或测试其他成员的私有模型，且对外统一表现为「模型不存在」。
  * - system 模型：仅 root。
@@ -102,31 +68,14 @@ export const authModelManage = async ({
 export const authModelInstanceAccess = async ({
   req,
   model,
-  isTeam = isTeamModel(model),
   resource = 'model'
 }: {
   req: AuthModeType['req'];
-  model: { tmbId?: string | null; scope?: string; isSystem?: boolean; teamId?: string | null };
-  /** 默认由模型自身 scope 推导；调用方可显式声明（如请求已指定 channelType=team）。 */
-  isTeam?: boolean;
+  model: ModelInstanceOwner;
   resource?: 'model' | 'channel';
-}): Promise<{ teamId: string; tmbId: string; ownerTmbId?: string }> => {
-  if (!isTeam) {
-    const { teamId, tmbId } = await authSystemAdmin({ req });
-    return { teamId, tmbId };
-  }
-
-  const { teamId, tmbId, tmb, isRoot } = await authUserPer({ req, authToken: true });
-  await assertTeamModelEnabled();
-  if (!isRoot) await assertMemberModelPermission(tmb.permission, resource);
-
-  if (model.teamId && model.teamId !== teamId) {
-    return Promise.reject(ModelErrEnum.unExist);
-  }
-  if (model.tmbId && model.tmbId !== tmbId) {
-    return Promise.reject(ModelErrEnum.unExist);
-  }
-  return { teamId, tmbId, ownerTmbId: model.tmbId || tmbId };
+}) => {
+  const actor = await authUserPer({ req, authToken: true });
+  return assertModelInstancePolicy({ model, actor, resource, allowMissingOwner: true });
 };
 
 /**
@@ -151,45 +100,19 @@ export const authAndGetModelInstance = async ({
   teamId: string;
   tmbId: string;
   ownerTmbId?: string;
-  model: SystemModelDataType;
+  model: AIModelDataType;
 }> => {
-  // 1. 优先校验会话凭证与显式作用域，禁止未认证请求直接打到数据库
-  const authRes = await authModelScopeOperation({ req, channelType });
-  const { teamId, tmbId, tmb, isRoot } = authRes;
-
-  // 2. 基于解析出的团队上下文（teamId）安全加载 Scoped ModelHandle
-  const modelHandle = await getTeamModelHandle({ teamId });
+  // 显式作用域先校验；旧调用未声明时，按已安装实例的真实归属执行策略。
+  const actor = channelType
+    ? await authModelScopeOperation({ req, channelType })
+    : await authUserPer({ req, authToken: true });
+  const modelHandle = await getTeamModelHandle({ teamId: actor.teamId });
   const model = modelHandle.findModelData({ modelId });
-
-  if (!model) {
+  if (!model || (channelType && channelType !== scopeToChannelType(model.scope))) {
     return Promise.reject(ModelErrEnum.unExist);
   }
-
-  // 3. 校验模型作用域是否与请求作用域严格对齐
-  if (channelType && channelType !== scopeToChannelType(model.scope)) {
-    return Promise.reject(ModelErrEnum.unExist);
-  }
-
-  // 4. 执行模型实例级访问与操作权限校验
-  const isTeam = isTeamModel(model);
-  if (!isTeam) {
-    if (!isRoot) return Promise.reject(ModelErrEnum.rootOnlyPermit);
-    return { teamId, tmbId, model };
-  }
-
-  await assertTeamModelEnabled();
-  if (!isRoot) {
-    await assertMemberModelPermission(tmb.permission, resource);
-  }
-
-  if (!model.teamId || String(model.teamId) !== String(teamId)) {
-    return Promise.reject(ModelErrEnum.unExist);
-  }
-  if (!model.tmbId || String(model.tmbId) !== String(tmbId)) {
-    return Promise.reject(ModelErrEnum.unExist);
-  }
-
-  return { teamId, tmbId, ownerTmbId: model.tmbId, model };
+  const access = await assertModelInstancePolicy({ model, actor, resource });
+  return { ...access, model };
 };
 
 /**
@@ -205,13 +128,13 @@ export async function authModelUse(params: {
   tmbId: string;
   teamId: string;
   optional?: false;
-}): Promise<SystemModelDataType>;
+}): Promise<AIModelDataType>;
 export async function authModelUse(params: {
   modelId: string;
   tmbId: string;
   teamId: string;
   optional: boolean;
-}): Promise<SystemModelDataType | undefined>;
+}): Promise<AIModelDataType | undefined>;
 export async function authModelUse({
   modelId,
   tmbId,
@@ -222,7 +145,7 @@ export async function authModelUse({
   tmbId: string;
   teamId: string;
   optional?: boolean;
-}): Promise<SystemModelDataType | undefined> {
+}): Promise<AIModelDataType | undefined> {
   const modelHandle = await getTeamModelHandle({ teamId });
   const modelData = modelHandle.findModelData({ modelId });
   if (!modelData || !modelData.isActive) {
@@ -251,58 +174,3 @@ export async function authModelUse({
 
   return modelData;
 }
-
-/**
- * 校验当前成员是否有权管理该模型的协作者权限：
- * 1. 系统模型：仅 root 或拥有团队管理权限 (hasManagePer) 的成员可操作
- * 2. 团队私有模型：
- *    - 必须属于当前团队 (teamId 一致)，否则对外视为不存在 (unExist)
- *    - 必须是模型的创建者 (owner) 或拥有该模型的协作者管理权限 (ModelPermission.hasManagePer)
- *    - 管理员和 root 也不能直接越权管理其他成员的私有模型
- */
-export const authModelCollaboratorManage = async ({
-  model,
-  teamId,
-  tmbId,
-  tmb,
-  isRoot
-}: {
-  model?: SystemModelDataType | null;
-  teamId: string;
-  tmbId: string;
-  tmb: { permission: TeamPermission };
-  isRoot?: boolean;
-}): Promise<SystemModelDataType> => {
-  if (!model) {
-    throw new UserError(ModelErrEnum.unExist);
-  }
-
-  if (isSystemModel(model)) {
-    if (!isRoot && !tmb.permission.hasManagePer) {
-      throw new UserError(ModelErrEnum.unAuthModel);
-    }
-    return model;
-  }
-
-  if (isTeamModel(model)) {
-    if (model.teamId !== teamId) {
-      throw new UserError(ModelErrEnum.unExist);
-    }
-    const isOwner = model.tmbId === tmbId;
-    if (!isOwner) {
-      const tmbPer = await getTmbPermission({
-        resourceType: PerResourceTypeEnum.model,
-        teamId,
-        resourceId: model.modelId,
-        tmbId
-      });
-      const modelPer = new ModelPermission({ role: tmbPer, isOwner: false });
-      if (!modelPer.hasManagePer) {
-        throw new UserError(ModelErrEnum.unExist);
-      }
-    }
-    return model;
-  }
-
-  throw new UserError(ModelErrEnum.unExist);
-};

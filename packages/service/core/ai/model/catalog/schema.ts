@@ -4,9 +4,10 @@ import { connectionMongo, defineIndex, getMongoModel } from '../../../../common/
 
 const { Schema } = connectionMongo;
 
-export const AIDefaultModelCollectionName = 'ai_default_models';
+// 历史集合名保持不变，目录状态包含修订号与系统默认槽位；无需迁移旧数据或索引。
+export const AIModelCatalogCollectionName = 'ai_default_models';
 
-export type AIDefaultModelSchemaType = {
+export type AIModelCatalogSchemaType = {
   _id: string;
   scope: ModelScopeEnum;
   teamId?: string;
@@ -29,7 +30,7 @@ const DefaultModelIdsSchema = new Schema(
   { _id: false }
 );
 
-const AIDefaultModelSchema = new Schema<AIDefaultModelSchemaType>({
+const AIModelCatalogSchema = new Schema<AIModelCatalogSchemaType>({
   catalogRevision: { type: Number, default: 0 },
   scope: {
     type: String,
@@ -38,7 +39,7 @@ const AIDefaultModelSchema = new Schema<AIDefaultModelSchemaType>({
   },
   teamId: {
     type: Schema.Types.ObjectId,
-    required(this: AIDefaultModelSchemaType) {
+    required(this: AIModelCatalogSchemaType) {
       return this.scope === ModelScopeEnum.team;
     }
   },
@@ -49,8 +50,8 @@ const AIDefaultModelSchema = new Schema<AIDefaultModelSchemaType>({
   }
 });
 
-// 系统作用域没有 owner ID，只能存在一条默认模型配置。
-defineIndex(AIDefaultModelSchema, {
+// 系统目录只有一条状态记录，同时保存系统默认模型配置。
+defineIndex(AIModelCatalogSchema, {
   key: { scope: 1 },
   options: {
     unique: true,
@@ -58,8 +59,8 @@ defineIndex(AIDefaultModelSchema, {
   }
 });
 
-// 预留团队安装模型：每个团队在 team scope 下只能有一条默认模型配置。
-defineIndex(AIDefaultModelSchema, {
+// 每个团队独立保存目录修订号；团队运行时默认槽位继续继承系统配置。
+defineIndex(AIModelCatalogSchema, {
   key: { scope: 1, teamId: 1 },
   options: {
     unique: true,
@@ -70,7 +71,7 @@ defineIndex(AIDefaultModelSchema, {
   }
 });
 
-export const MongoAIDefaultModel = getMongoModel<AIDefaultModelSchemaType>(
-  AIDefaultModelCollectionName,
-  AIDefaultModelSchema
+export const MongoAIModelCatalog = getMongoModel<AIModelCatalogSchemaType>(
+  AIModelCatalogCollectionName,
+  AIModelCatalogSchema
 );

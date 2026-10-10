@@ -10,7 +10,7 @@ import { Prompt_AgentQA } from '@fastgpt/global/core/ai/prompt/agent';
 import type { PushDataChunkType } from '@fastgpt/global/openapi/core/dataset/data/api';
 
 import { checkTeamAiPointsAndLock } from './utils';
-import type { LLMSystemModelDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { LLMModelDataType } from '@fastgpt/global/core/ai/model/schema';
 import {
   chunkAutoChunkSize,
   getLLMMaxChunkSize
@@ -223,7 +223,7 @@ async function formatSplitText({
 }: {
   answer: string;
   rawText: string;
-  llmModel: LLMSystemModelDataType;
+  llmModel: LLMModelDataType;
 }) {
   answer = answer.replace(/\\n/g, '\n'); // 将换行符替换为空格
   const regex = /Q\d+:(\s*)(.*)(\s*)A\d+:(\s*)([\s\S]*?)(?=Q\d|$)/g; // 匹配Q和A的正则表达式

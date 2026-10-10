@@ -2,9 +2,11 @@ import { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { UserError } from '@fastgpt/global/common/error/utils';
 import { Types } from '../../../common/mongo';
-import { runModelTransaction, deleteModelRecords, type ModelCatalogScope } from './entity';
+import type { ModelCatalogScope } from './catalog/entity';
+import { runModelTransaction } from './catalog/transaction';
+import { deleteModelRecords } from './cleanup';
 import { MongoAIModel } from './schema';
-import { updatedReloadSystemModel } from './catalog';
+import { updatedReloadSystemModel } from './catalog/service';
 import { invalidateTeamModelCatalog } from './teamModelCache';
 import { refreshModelTemplates } from './template';
 import type {
@@ -12,7 +14,7 @@ import type {
   CreateModelsFromTemplatesBody,
   UpdateModelBody
 } from '@fastgpt/global/openapi/core/ai/model/api';
-import { getSystemModelConfigUpdate, sanitizeTeamModelData } from './utils';
+import { getModelConfigUpdate, sanitizeTeamModelData } from './utils';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 
 type ModelMutationOwner = { channelType?: ChannelType; tmbId?: string; teamId?: string };
@@ -65,7 +67,7 @@ export const updateModel = async ({
       throw new UserError(ModelErrEnum.alreadyExists);
     await MongoAIModel.updateOne(
       { _id: modelId, ...filter },
-      getSystemModelConfigUpdate(
+      getModelConfigUpdate(
         context.scope === ModelScopeEnum.team ? sanitizeTeamModelData(modelData) : modelData
       ),
       { session }

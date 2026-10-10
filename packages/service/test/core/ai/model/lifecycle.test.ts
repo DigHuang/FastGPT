@@ -1,9 +1,12 @@
+import { MongoModelStatusProbeRecord } from '@fastgpt/service/core/ai/modelStatus/schema';
+import { resourcePermissionRepo } from '@fastgpt/service/support/permission/repository/resourcePermissionRepo';
+import { readModelCatalogRevision } from '@fastgpt/service/core/ai/model/catalog/entity';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelScopeEnum, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import { Types } from '@fastgpt/service/common/mongo';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 import { MongoAIModel } from '@fastgpt/service/core/ai/model/schema';
-import { MongoAIDefaultModel } from '@fastgpt/service/core/ai/model/default/schema';
+import { MongoAIModelCatalog } from '@fastgpt/service/core/ai/model/catalog/schema';
 import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
 import {
   PerResourceTypeEnum,
@@ -14,12 +17,13 @@ import { publishSystemModelHandle } from '@fastgpt/service/core/ai/model/cache';
 const proxy = vi.hoisted(() => ({ append: vi.fn(), rename: vi.fn(), remove: vi.fn() }));
 // 只替换渠道 I/O 边界，模型、版本、ACL 和补偿更新均执行真实数据库实现。
 vi.mock('@fastgpt/service/core/ai/model/channel/binding', () => ({
-  appendModelToChannels: proxy.append,
+  updateModelChannelBindings: proxy.append,
   syncModelNameInChannels: proxy.rename,
   removeModelsFromChannels: proxy.remove
 }));
 import {
   createModelWithLifecycle,
+  createModelsFromTemplatesWithLifecycle,
   updateModelWithLifecycle,
   deleteModelsWithLifecycle,
   importSystemModelsWithLifecycle
@@ -45,8 +49,9 @@ const draft = {
 beforeEach(async () => {
   await Promise.all([
     MongoAIModel.deleteMany({}),
-    MongoAIDefaultModel.deleteMany({}),
-    MongoResourcePermission.deleteMany({})
+    MongoAIModelCatalog.deleteMany({}),
+    MongoResourcePermission.deleteMany({}),
+    MongoModelStatusProbeRecord.deleteMany({})
   ]);
   publishSystemModelHandle(undefined);
   proxy.append.mockReset().mockResolvedValue(undefined);
@@ -67,6 +72,40 @@ describe('model lifecycle', () => {
       expect.objectContaining({ oldModel: 'original', newModel: 'renamed', channelType: 'system' })
     );
   });
+  it('keeps a committed creation successful when the channel binding fails', async () => {
+    proxy.append.mockRejectedValueOnce(new Error('proxy unavailable'));
+    const created = await createModelWithLifecycle({ ...owner, modelData: draft, channelIds: [1] });
+    expect(await MongoAIModel.exists({ _id: created.modelId })).toBeTruthy();
+    expect(proxy.append).toHaveBeenCalledWith({
+      model: draft.model,
+      addChannelIds: [1],
+      channelType: 'system',
+      tmbId: ''
+    });
+  });
+
+  it('binds already installed templates too and continues after one binding fails', async () => {
+    const templates = await import('@fastgpt/service/core/ai/model/template');
+    const second = { ...draft, model: 'second' };
+    const templateSpy = vi
+      .spyOn(templates, 'refreshModelTemplates')
+      .mockResolvedValue([draft, second]);
+    try {
+      await createModelWithLifecycle({ ...owner, modelData: draft });
+      proxy.append.mockRejectedValueOnce(new Error('first binding failed'));
+      const result = await createModelsFromTemplatesWithLifecycle({
+        ...owner,
+        templates: [draft, second].map(({ model, type }) => ({ model, type })),
+        channelIds: [1]
+      });
+      expect(result.models.map(({ model }) => model)).toEqual(['second']);
+      expect(proxy.append.mock.calls.map(([arg]) => arg.model)).toEqual(['original', 'second']);
+      expect(await MongoAIModel.countDocuments({})).toBe(2);
+    } finally {
+      templateSpy.mockRestore();
+    }
+  });
+
   it('compensates the Mongo identifier after failed channel synchronization', async () => {
     const model = await createModelWithLifecycle({ ...owner, modelData: draft });
     proxy.rename.mockRejectedValueOnce(new Error('proxy unavailable'));
@@ -132,6 +171,61 @@ describe('model lifecycle', () => {
       tmbId: ''
     });
   });
+  it('cleans all teams ACL and probe history only for the deleted model', async () => {
+    const removed = await createModelWithLifecycle({ ...owner, modelData: draft });
+    const retained = await createModelWithLifecycle({
+      ...owner,
+      modelData: { ...draft, model: 'retained' }
+    });
+    for (const modelId of [removed.modelId, retained.modelId]) {
+      for (let team = 0; team < 2; team++) {
+        await MongoResourcePermission.create({
+          resourceType: PerResourceTypeEnum.model,
+          resourceId: modelId,
+          teamId: new Types.ObjectId(),
+          tmbId: new Types.ObjectId(),
+          permission: ReadPermissionVal
+        });
+      }
+      await MongoModelStatusProbeRecord.create({
+        modelId,
+        model: 'probe',
+        name: 'Probe',
+        provider: 'OpenAI',
+        type: 'llm',
+        status: 'green',
+        attempts: 1,
+        requestStartedAt: new Date(),
+        requestEndedAt: new Date()
+      });
+    }
+    await deleteModelsWithLifecycle({ ...owner, modelIds: [removed.modelId] });
+    expect(await MongoResourcePermission.countDocuments({ resourceId: removed.modelId })).toBe(0);
+    expect(await MongoModelStatusProbeRecord.countDocuments({ modelId: removed.modelId })).toBe(0);
+    expect(await MongoResourcePermission.countDocuments({ resourceId: retained.modelId })).toBe(2);
+    expect(await MongoModelStatusProbeRecord.countDocuments({ modelId: retained.modelId })).toBe(1);
+    expect(await MongoAIModel.exists({ _id: retained.modelId })).toBeTruthy();
+  });
+
+  it('rolls back entity deletion and the catalog revision if cross-domain cleanup fails', async () => {
+    const created = await createModelWithLifecycle({ ...owner, modelData: draft });
+    const context = { scope: ModelScopeEnum.system } as const;
+    const revision = await readModelCatalogRevision(context);
+    const cleanup = vi
+      .spyOn(resourcePermissionRepo, 'deleteByResourceIdsAcrossTeams')
+      .mockRejectedValueOnce(new Error('ACL unavailable'));
+    try {
+      await expect(
+        deleteModelsWithLifecycle({ ...owner, modelIds: [created.modelId] })
+      ).rejects.toThrow('ACL unavailable');
+      expect(await MongoAIModel.exists({ _id: created.modelId })).toBeTruthy();
+      expect(await readModelCatalogRevision(context)).toBe(revision);
+      expect(proxy.remove).not.toHaveBeenCalled();
+    } finally {
+      cleanup.mockRestore();
+    }
+  });
+
   it('keeps a committed deletion successful when channel cleanup fails', async () => {
     const model = await createModelWithLifecycle({ ...owner, modelData: draft });
     proxy.remove.mockRejectedValueOnce(new Error('proxy unavailable'));

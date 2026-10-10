@@ -1,5 +1,5 @@
 import { getModelDetail, postUpdateModelChannels } from '@/web/core/ai/model/api';
-import type { SystemModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
+import type { AIModelDocumentDataType } from '@fastgpt/global/core/ai/model/schema';
 import type { ModelConfigListItem } from '@fastgpt/global/openapi/core/ai/model/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { useConfirm } from '@fastgpt/web/hooks/useConfirm';
@@ -103,7 +103,7 @@ export const useModelEditWorkflow = ({
     });
   };
 
-  const submitModel = async (data: SystemModelDocumentDataType) => {
+  const submitModel = async (data: AIModelDocumentDataType) => {
     await submitUpdatedModel({
       modelId: model.modelId,
       modelData: data,

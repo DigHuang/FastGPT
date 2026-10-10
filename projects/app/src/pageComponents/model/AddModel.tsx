@@ -1,8 +1,9 @@
+import type { CreateChannelResponse } from '@fastgpt/global/openapi/core/ai/model/channel/api';
 import { useModelChannelTest } from './useModelChannelTest';
 import type { ModelChannelSummary } from '@fastgpt/global/openapi/core/ai/model/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { getModelTemplates, postModelsFromTemplates } from '@/web/core/ai/model/api';
-import { defaultChannel, type ChannelInfoType } from '@fastgpt/global/core/ai/model/channel';
+import { defaultChannel } from '@fastgpt/global/core/ai/model/channel';
 import {
   Box,
   Button,
@@ -24,8 +25,8 @@ import type { ModelScopeEnum } from '@fastgpt/global/core/ai/constants';
 import { modelTypeList, ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import { channelTypeToScope, resolveChannelType } from '@fastgpt/global/core/ai/model/utils';
 import type {
-  SystemModelDataType,
-  SystemModelDocumentDataType
+  AIModelDataType,
+  AIModelDocumentDataType
 } from '@fastgpt/global/core/ai/model/schema';
 import {
   sortModelsByProvider,
@@ -58,7 +59,7 @@ import TestModeBetaTag from '@/components/core/ai/TestModeBetaTag';
 const EditChannelModal = dynamic(() => import('./Channel/EditChannelModal'), { ssr: false });
 
 /** 空白模型只使用固定默认值；数值草稿的 NaN 表示未填写，提交时再补齐引用上限。 */
-const createBlankSystemModelData = ({
+const createBlankModelData = ({
   type,
   channelType,
   scope
@@ -66,7 +67,7 @@ const createBlankSystemModelData = ({
   type: ModelTypeEnum;
   channelType?: ChannelType;
   scope?: ModelScopeEnum;
-}): SystemModelDocumentDataType => {
+}): AIModelDocumentDataType => {
   const resolvedScope = channelTypeToScope(
     resolveChannelType({ channelType, scope })
   ) as ModelScopeEnum.system;
@@ -245,38 +246,15 @@ const ModelTypeSelector = ({
  * 【职责与行为】
  * 1. 维护当前选中的渠道集合（内部统一以 Set<number> 维护，避免重复并保持与 ModelLinkedChannels 一致）。
  * 2. 对外同时暴露 Set 与 Array 格式的读写接口，抹平 ModelLinkedChannels 与 ModelChannelSelector 的格式差异。
- * 3. 当通过 EditChannelModal 新建渠道时，通过传入的 channelId 或新创建的 channelName，在外部 channels 刷新后
- *    自动将其追加至当前选中集合中，实现与模型编辑弹窗一致的新建自动勾选体验。
+ * 3. 新建渠道后直接使用服务端返回的 ID 自动选中，列表刷新只负责展示最新摘要。
  * 4. 依赖外部由 useModelConfig 提供的 onRefresh 进行父级渠道列表刷新，杜绝在子组件内重复并发请求 getModelConfig。
  */
-const useChannelAutoSelect = ({
-  channels,
-  onRefresh
-}: {
-  channels: ModelChannelSummary[];
-  onRefresh?: () => unknown | Promise<unknown>;
-}) => {
+const useChannelAutoSelect = ({ onRefresh }: { onRefresh?: () => unknown | Promise<unknown> }) => {
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<number>>(new Set());
-  const pendingChannelNameRef = useRef<string | null>(null);
-
-  // 当外部 channels 刷新后，匹配刚创建成功的渠道并自动追加至选中集合
-  useEffect(() => {
-    if (!pendingChannelNameRef.current) return;
-    const targetName = pendingChannelNameRef.current;
-    const createdChannel = channels.find((c) => c.name.trim() === targetName);
-    if (createdChannel) {
-      setSelectedChannelIds((prev) => new Set([...prev, createdChannel.id]));
-      pendingChannelNameRef.current = null;
-    }
-  }, [channels]);
-
   const onChannelCreated = useCallback(
-    async (createdData?: ChannelInfoType) => {
-      const trimmedName = createdData?.name?.trim();
-      if (trimmedName) {
-        pendingChannelNameRef.current = trimmedName;
-      }
-      await Promise.resolve(onRefresh?.());
+    async (created?: CreateChannelResponse) => {
+      if (created) setSelectedChannelIds((previous) => new Set([...previous, created.id]));
+      await onRefresh?.();
     },
     [onRefresh]
   );
@@ -311,8 +289,8 @@ const BlankModelCreateModal = ({
   onSuccess,
   onClose
 }: {
-  createModelData: (type: ModelTypeEnum) => SystemModelDocumentDataType;
-  defaultModelData?: SystemModelDocumentDataType;
+  createModelData: (type: ModelTypeEnum) => AIModelDocumentDataType;
+  defaultModelData?: AIModelDocumentDataType;
   providers: ModelProviderItemType[];
   channels: ModelChannelSummary[];
   channelType: ChannelType;
@@ -328,7 +306,6 @@ const BlankModelCreateModal = ({
   );
   const [submitting, setSubmitting] = useState(false);
   const { selectedChannelIds, setSelectedChannelIds, onChannelCreated } = useChannelAutoSelect({
-    channels,
     onRefresh: onRefreshChannels ?? onSuccess
   });
   const [showAssociateChannel, setShowAssociateChannel] = useState(false);
@@ -528,13 +505,13 @@ const TemplateCreateModal = ({
   onRefresh,
   onSelectSingleTemplate
 }: {
-  installedModels: SystemModelDataType[];
+  installedModels: AIModelDataType[];
   channels: ModelChannelSummary[];
   channelType: ChannelType;
   onClose: () => void;
   onSuccess: () => Promise<void>;
   onRefresh?: () => Promise<void>;
-  onSelectSingleTemplate?: (template: SystemModelDocumentDataType) => void;
+  onSelectSingleTemplate?: (template: AIModelDocumentDataType) => void;
 }) => {
   const { t, i18n } = useSafeTranslation();
   const [step, setStep] = useState<1 | 2>(1);
@@ -544,7 +521,6 @@ const TemplateCreateModal = ({
   const [templateSearch, setTemplateSearch] = useState('');
   const { selectedChannelIdList, setSelectedChannelIdList, onChannelCreated } =
     useChannelAutoSelect({
-      channels,
       onRefresh: onRefresh ?? onSuccess
     });
   const [showCreateChannel, setShowCreateChannel] = useState(false);
@@ -928,7 +904,7 @@ const AddModel = ({
   buttonBoxProps,
   ...buttonProps
 }: {
-  installedModels: SystemModelDataType[];
+  installedModels: AIModelDataType[];
   channels: ModelChannelSummary[];
   providers: ModelProviderItemType[];
   channelType: ChannelType;
@@ -937,11 +913,9 @@ const AddModel = ({
 } & ButtonProps) => {
   const [showBlankCreate, setShowBlankCreate] = useState(false);
   const [showTemplateCreate, setShowTemplateCreate] = useState(false);
-  const [templateForConfig, setTemplateForConfig] = useState<SystemModelDocumentDataType | null>(
-    null
-  );
+  const [templateForConfig, setTemplateForConfig] = useState<AIModelDocumentDataType | null>(null);
   const getBlankModelData = useCallback(
-    (type: ModelTypeEnum) => createBlankSystemModelData({ type, channelType }),
+    (type: ModelTypeEnum) => createBlankModelData({ type, channelType }),
     [channelType]
   );
 

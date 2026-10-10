@@ -1,4 +1,7 @@
-import type { ChannelConfig } from '@fastgpt/global/core/ai/model/channel';
+import {
+  REASONING_FIELD_MAPPING_CHANNEL_TYPES,
+  type ChannelConfig
+} from '@fastgpt/global/core/ai/model/channel';
 import { ModelErrEnum } from '@fastgpt/global/common/error/code/model';
 import { aiProxyClient } from '../../../../thirdProvider/aiproxy/client';
 import type {
@@ -7,11 +10,7 @@ import type {
 } from '@fastgpt/global/openapi/core/ai/model/channel/api';
 import type { ChannelType } from '@fastgpt/global/core/ai/model/scope';
 import { getCachedTypeMetas } from './cache';
-import {
-  resolveChannelForOperation,
-  resolveChannelsForOperation,
-  type ResolvedChannel
-} from './resolve';
+import { resolveChannelForOperation, resolveChannelsForOperation } from './resolve';
 import { getAiproxyClientByGroupId, getAiproxyClientByScope } from './client';
 import { getChannelAffectedModels, getBatchChannelsAffectedModels } from './association';
 
@@ -27,17 +26,7 @@ type ChannelScope = {
 
 type AffectedModel = { modelId: string; name: string; model: string };
 
-const groupChannelIdsByGroupId = (resolved: ResolvedChannel[]): Map<string, number[]> => {
-  const idsByGroup = new Map<string, number[]>();
-  for (const item of resolved) {
-    if (item.kind !== 'group') continue;
-    const ids = idsByGroup.get(item.groupId) ?? [];
-    ids.push(item.channel.id);
-    idsByGroup.set(item.groupId, ids);
-  }
-  return idsByGroup;
-};
-
+/** 将上游不同版本的重名错误归一为平台错误码，普通更新与创建共用。 */
 const isChannelNameConflictError = (error: unknown): boolean => {
   const msg =
     (error as { message?: string })?.message ??
@@ -80,11 +69,19 @@ export const createChannel = async ({
   channelType: ChannelType;
   tmbId: string;
   channelData: ChannelConfig;
-}): Promise<void> => {
+}) => {
   const client = getAiproxyClientByScope({ channelType, tmbId }).channels;
-  await assertChannelNameUnique({ client, name: channelData.name });
+  const data = {
+    ...channelData,
+    name: channelData.name.trim(),
+    // 默认协议配置属于平台创建规则；调用方显式提供的配置（含 false）优先。
+    configs: REASONING_FIELD_MAPPING_CHANNEL_TYPES.some((type) => type === channelData.type)
+      ? { map_reasoning_to_reasoning_content: true, ...channelData.configs }
+      : channelData.configs
+  };
+  await assertChannelNameUnique({ client, name: data.name });
   try {
-    await client.create(channelData);
+    return await client.create(data);
   } catch (error) {
     if (isChannelNameConflictError(error)) {
       return Promise.reject(ModelErrEnum.channelNameConflict);
@@ -172,31 +169,15 @@ export const batchOperateChannels = async ({
       resolved.map((item) => item.channel),
       teamId
     );
-    if (body.channelType === 'system') {
-      await getAiproxyClientByScope({ channelType: body.channelType, tmbId }).channels.batchDelete(
-        body.ids
-      );
-    } else {
-      await Promise.all(
-        Array.from(groupChannelIdsByGroupId(resolved)).map(([groupId, ids]) =>
-          getAiproxyClientByGroupId(groupId).channels.batchDelete(ids)
-        )
-      );
-    }
+    await getAiproxyClientByScope({ channelType: body.channelType, tmbId }).channels.batchDelete(
+      body.ids
+    );
     return { affectedModels };
   }
 
-  if (body.channelType === 'system') {
-    await getAiproxyClientByScope({
-      channelType: body.channelType,
-      tmbId
-    }).channels.batchUpdateStatus(body.ids, body.status);
-  } else {
-    await Promise.all(
-      Array.from(groupChannelIdsByGroupId(resolved)).map(([groupId, ids]) =>
-        getAiproxyClientByGroupId(groupId).channels.batchUpdateStatus(ids, body.status)
-      )
-    );
-  }
+  await getAiproxyClientByScope({
+    channelType: body.channelType,
+    tmbId
+  }).channels.batchUpdateStatus(body.ids, body.status);
   return {};
 };
