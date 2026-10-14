@@ -14,7 +14,8 @@ import { SandboxDownloadBodySchema } from '@fastgpt/global/openapi/core/ai/sandb
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   isSandboxPathDirectory,
-  addDirectoryToArchive
+  addDirectoryToArchive,
+  streamDirectoryZipFromSandbox
 } from '@fastgpt/service/core/ai/sandbox/application/file';
 
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
@@ -131,12 +132,16 @@ async function handler(req: ApiRequestProps, res: NextApiResponse): Promise<void
       `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`
     );
 
-    await writeDirectoryArchiveResponse({
-      sandbox,
-      archive: archiver('zip', { zlib: { level: 9 } }),
-      res,
-      path
-    });
+    if (typeof streamDirectoryZipFromSandbox === 'function') {
+      await pipeline(Readable.from(streamDirectoryZipFromSandbox({ sandbox, path })), res);
+    } else {
+      await writeDirectoryArchiveResponse({
+        sandbox,
+        archive: archiver('zip', { zlib: { level: 9 } }),
+        res,
+        path
+      });
+    }
   } else {
     await writeFileStreamResponse({ sandbox, res, path });
   }

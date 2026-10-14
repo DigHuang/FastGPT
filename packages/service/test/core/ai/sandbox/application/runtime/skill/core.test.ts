@@ -192,7 +192,12 @@ description: Zeta skill
         makeWriteResults(entries)
       ),
       execute: vi.fn(async (command: string) => {
-        if (command.includes('unzip')) {
+        if (
+          command.includes('mkfifo') ||
+          command.includes('tar -xf -') ||
+          command.includes('consumer.pid') ||
+          command.includes('rm -rf')
+        ) {
           return {
             exitCode: 0,
             stdout: '',
@@ -233,30 +238,25 @@ description: Zeta skill
       skillDirectories: deployedSkillVersions.map(({ targetDir }) => targetDir)
     });
 
-    expect(sandbox.writeFiles).toHaveBeenCalledTimes(2);
+    expect(sandbox.writeFiles).toHaveBeenCalled();
     expect(skill1TargetDir).not.toBe(skill2TargetDir);
     const writeEntries = sandbox.writeFiles.mock.calls.flatMap(([entries]) => entries);
     const writtenFilePaths = writeEntries.map((entry: { path: string }) => entry.path);
     expect(
-      writeEntries.every((entry: { data: unknown }) => entry.data instanceof ReadableStream)
+      writtenFilePaths.every(
+        (path: string) => path.endsWith('/stream.pipe') || path.endsWith('/input.eof')
+      )
     ).toBe(true);
-    expect(writtenFilePaths).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining(`/workspace/projects/.tmp-${String(skill1VersionId)}`),
-        expect.stringContaining(`/workspace/projects/.tmp-${String(skill2VersionId)}`)
-      ])
-    );
-    expect(writtenFilePaths.every((path: string) => path.endsWith('/package.zip'))).toBe(true);
-    const unzipCommands = sandbox.execute.mock.calls
+    const tarCommands = sandbox.execute.mock.calls
       .map(([command]) => command)
-      .filter((command) => command.includes('unzip'));
-    expect(unzipCommands).toHaveLength(1);
-    for (const zipPath of writtenFilePaths) {
-      expect(unzipCommands[0]).toContain(`unzip -Z -t '${zipPath}'`);
-      expect(unzipCommands[0]).toContain(`unzip -Z1 '${zipPath}'`);
-      expect(unzipCommands[0]).toContain(`unzip -o -q '${zipPath}'`);
-    }
-    expect(sandbox.deleteFiles).toHaveBeenCalledWith(writtenFilePaths);
+      .filter((command) => command.includes('tar -xf -'));
+    expect(tarCommands).toHaveLength(2);
+    expect(
+      tarCommands.some((cmd) => cmd.includes(`/workspace/projects/.tmp-${String(skill1VersionId)}`))
+    ).toBe(true);
+    expect(
+      tarCommands.some((cmd) => cmd.includes(`/workspace/projects/.tmp-${String(skill2VersionId)}`))
+    ).toBe(true);
     const [moveEntries] = sandbox.moveFiles.mock.calls[0];
     expect(moveEntries).toHaveLength(2);
     expect(moveEntries).toEqual(
@@ -406,7 +406,12 @@ describe('injectAgentSkillFilesToSandbox', () => {
         makeWriteResults(entries)
       ),
       execute: vi.fn(async (command: string) => {
-        if (command.includes('unzip')) {
+        if (
+          command.includes('mkfifo') ||
+          command.includes('tar -xf -') ||
+          command.includes('consumer.pid') ||
+          command.includes('rm -rf')
+        ) {
           return {
             exitCode: 0,
             stdout: '',
@@ -447,13 +452,12 @@ description: Latest current skill
       skillDirectories: deployedSkillVersions.map(({ targetDir }) => targetDir)
     });
 
-    expect(
-      sandbox.writeFiles.mock.calls[0][0].map((entry: { path: string }) => entry.path)
-    ).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining(`/workspace/projects/.tmp-${String(latestVersionId)}`)
-      ])
-    );
+    const tarCommands = sandbox.execute.mock.calls
+      .map(([command]) => command)
+      .filter((command) => command.includes('tar -xf -'));
+    expect(tarCommands).toEqual([
+      expect.stringContaining(`/workspace/projects/.tmp-${String(latestVersionId)}`)
+    ]);
     expect(sandbox.moveFiles).toHaveBeenCalledWith([
       expect.objectContaining({ destination: latestTargetDir })
     ]);
@@ -507,7 +511,14 @@ description: Latest current skill
         makeWriteResults(entries)
       ),
       execute: vi.fn(async (command: string) => {
-        if (command.includes('unzip')) return { exitCode: 0, stdout: '', stderr: '' };
+        if (
+          command.includes('mkfifo') ||
+          command.includes('tar -xf -') ||
+          command.includes('consumer.pid') ||
+          command.includes('rm -rf')
+        ) {
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
         throw new Error(`Unexpected command: ${command}`);
       }),
       readFiles: vi.fn()
@@ -620,7 +631,12 @@ description: Latest current skill
         makeWriteResults(entries)
       ),
       execute: vi.fn(async (command: string) => {
-        if (command.includes('unzip')) {
+        if (
+          command.includes('mkfifo') ||
+          command.includes('tar -xf -') ||
+          command.includes('consumer.pid') ||
+          command.includes('rm -rf')
+        ) {
           return { exitCode: 0, stdout: '', stderr: '' };
         }
 
@@ -647,14 +663,13 @@ description: Latest current skill
         targetDir: readableTargetDir
       }
     ]);
-    expect(sandbox.writeFiles).toHaveBeenCalledTimes(1);
-    const writtenFilePaths = sandbox.writeFiles.mock.calls[0][0].map(
-      (entry: { path: string }) => entry.path
-    );
-    expect(writtenFilePaths).toEqual([
+    const tarCommands = sandbox.execute.mock.calls
+      .map(([command]) => command)
+      .filter((command) => command.includes('tar -xf -'));
+    expect(tarCommands).toEqual([
       expect.stringContaining(`/workspace/projects/.tmp-${String(readableVersionId)}`)
     ]);
-    expect(writtenFilePaths.join('\n')).not.toContain(String(protectedVersionId));
+    expect(tarCommands.join('\n')).not.toContain(String(protectedVersionId));
     expect(sandbox.moveFiles).toHaveBeenCalledWith([
       expect.objectContaining({ destination: readableTargetDir })
     ]);
@@ -775,7 +790,7 @@ description: Latest current skill
           error: writeError
         }))
       ),
-      execute: vi.fn(),
+      execute: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
       readFiles: vi.fn()
     };
 
@@ -787,11 +802,10 @@ description: Latest current skill
         tmbId,
         workDirectory: '/workspace'
       })
-    ).rejects.toThrow('Failed to write skill ZIP package: write failed');
+    ).rejects.toThrow('Failed to write archive stream to sandbox: write failed');
     expect(sandbox.deleteDirectories).toHaveBeenCalledWith([
       expect.stringContaining(`/workspace/projects/.tmp-${String(skillVersionId)}`)
     ]);
-    expect(sandbox.execute).not.toHaveBeenCalled();
     expect(sandbox.readFiles).not.toHaveBeenCalled();
   });
 

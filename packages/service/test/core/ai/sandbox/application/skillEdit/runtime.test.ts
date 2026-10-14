@@ -166,11 +166,18 @@ const createContext = (
 
 const createPackageSandbox = (readResult?: { content: Uint8Array; error: Error | null }) => ({
   execute: vi.fn(async (command: string) => {
-    if (command === 'printf "%s" "$HOME"') {
-      return { stdout: '/home/sandbox', stderr: '', exitCode: 0 };
-    }
     if (command.includes("awk '{s+=$7}")) {
       return { stdout: '12', stderr: '', exitCode: 0 };
+    }
+    if (command.includes('wc -l')) {
+      return { stdout: '1', stderr: '', exitCode: 0 };
+    }
+    if (command.includes('split -b')) {
+      return {
+        stdout: 'LAST_CHUNK\t/tmp/.fastgpt-pack-test/part-000000.ready\n',
+        stderr: '',
+        exitCode: 0
+      };
     }
     return { stdout: '', stderr: '', exitCode: 0 };
   }),
@@ -202,13 +209,7 @@ describe('packageSkillInSandbox', () => {
     mocks.disconnectSandbox.mockResolvedValue(undefined);
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('packages, validates and removes the temporary zip', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-17T00:00:00.000Z'));
+  it('streams, validates and cleans up staging parts', async () => {
     const sandbox = createPackageSandbox();
     mocks.connectToSandbox.mockResolvedValueOnce(sandbox);
 
@@ -220,19 +221,23 @@ describe('packageSkillInSandbox', () => {
       Buffer.from([1, 2, 3]),
       expect.any(Object)
     );
-    expect(sandbox.deleteFiles).toHaveBeenCalledWith([
-      expect.stringMatching(/^\/home\/sandbox\/\.fastgpt\/tmp\/skill-package-/)
-    ]);
-    expect(sandbox.execute).toHaveBeenCalledWith(expect.stringContaining("awk '{s+=$7}"), {
-      workingDirectory: '/workspace'
-    });
-    expect(sandbox.execute).toHaveBeenCalledWith(expect.stringMatching(/^zip -r -y /), {
-      workingDirectory: '/workspace'
-    });
+    expect(sandbox.readFiles).toHaveBeenCalledWith(['/tmp/.fastgpt-pack-test/part-000000.ready']);
+    expect(sandbox.execute).toHaveBeenCalledWith(
+      expect.stringContaining("awk '{s+=$7}"),
+      expect.any(Object)
+    );
+    expect(sandbox.execute).toHaveBeenCalledWith(
+      expect.stringContaining('split -b'),
+      expect.any(Object)
+    );
+    expect(sandbox.execute).toHaveBeenCalledWith(
+      expect.stringContaining('rm -rf "$STAGE_DIR"'),
+      expect.any(Object)
+    );
     expect(mocks.disconnectSandbox).toHaveBeenCalledWith(sandbox);
   });
 
-  it('uses basic zip validation for export', async () => {
+  it('uses basic archive validation for export', async () => {
     const sandbox = createPackageSandbox();
     mocks.connectToSandbox.mockResolvedValueOnce(sandbox);
 

@@ -38,8 +38,6 @@ import {
   getSessionVolumeConfig
 } from '../infrastructure/volume/service';
 import { type SandboxInstanceSchemaType, type SandboxProviderType } from '../type';
-
-import { joinSandboxPath } from '../utils';
 import { withSandboxLifecycleLease } from './lease';
 import { runSandboxLifecycleOperation, type SandboxLifecycleDefinition } from './lifecycle/runner';
 
@@ -47,12 +45,18 @@ import { SandboxOperationSettledError, SandboxOperationConflictError } from './l
 import { canResumeSandboxOperation } from './lifecycle/utils';
 import type { OwnedSandboxResource } from './runtime/type';
 
+import type { Readable } from 'node:stream';
+import {
+  EMPTY_TAR_GZ_BUFFER,
+  streamExtractTarGzIntoSandbox,
+  streamPackFromSandbox
+} from './streamArchive';
+
 const logger = getLogger(LogCategories.MODULE.AI.SANDBOX);
 
-const TEMP_ARCHIVE_FILE = '.fastgpt-sandbox-archive.zip';
-const RESTORE_ARCHIVE_FILE = '.fastgpt-sandbox-restore.zip';
-const EMPTY_ZIP_BUFFER = Buffer.from('504b0506000000000000000000000000000000000000', 'hex');
-const ARCHIVE_TEMP_FILE_NAMES = [TEMP_ARCHIVE_FILE, RESTORE_ARCHIVE_FILE];
+const LEGACY_TEMP_ARCHIVE_FILE = '.fastgpt-sandbox-archive.zip';
+const LEGACY_RESTORE_ARCHIVE_FILE = '.fastgpt-sandbox-restore.zip';
+const ARCHIVE_TEMP_FILE_NAMES = [LEGACY_TEMP_ARCHIVE_FILE, LEGACY_RESTORE_ARCHIVE_FILE];
 
 type SandboxPhysicalResource = Pick<
   SandboxResourceDoc,
@@ -82,44 +86,6 @@ const runSandboxCommand = async (
     throw new Error(message);
   }
   return result;
-};
-
-/** 归档前确保历史镜像中存在 zip。 */
-const ensureZipAvailableInSandbox = async (sandbox: ISandbox, signal: AbortSignal) => {
-  const command = [
-    'if command -v zip >/dev/null 2>&1; then exit 0; fi',
-    'if command -v apt-get >/dev/null 2>&1; then',
-    '  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zip || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zip);',
-    'elif command -v apk >/dev/null 2>&1; then apk add --no-cache zip;',
-    'elif command -v yum >/dev/null 2>&1; then yum install -y zip;',
-    'elif command -v dnf >/dev/null 2>&1; then dnf install -y zip;',
-    'else echo "No supported package manager found to install zip" >&2; exit 127; fi',
-    'command -v zip >/dev/null 2>&1'
-  ].join('\n');
-  await runSandboxCommand(sandbox, command, {
-    signal,
-    timeoutMs: SANDBOX_ARCHIVE_COMMAND_TIMEOUT_MS,
-    maxOutputBytes: 8 * 1024
-  });
-};
-
-/** 恢复前确保镜像中存在 unzip。 */
-const ensureUnzipAvailableInSandbox = async (sandbox: ISandbox, signal: AbortSignal) => {
-  const command = [
-    'if command -v unzip >/dev/null 2>&1; then exit 0; fi',
-    'if command -v apt-get >/dev/null 2>&1; then',
-    '  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends unzip || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends unzip);',
-    'elif command -v apk >/dev/null 2>&1; then apk add --no-cache unzip;',
-    'elif command -v yum >/dev/null 2>&1; then yum install -y unzip;',
-    'elif command -v dnf >/dev/null 2>&1; then dnf install -y unzip;',
-    'else echo "No supported package manager found to install unzip" >&2; exit 127; fi',
-    'command -v unzip >/dev/null 2>&1'
-  ].join('\n');
-  await runSandboxCommand(sandbox, command, {
-    signal,
-    timeoutMs: SANDBOX_ARCHIVE_COMMAND_TIMEOUT_MS,
-    maxOutputBytes: 8 * 1024
-  });
 };
 
 async function buildArchiveRuntimeConfig(resource: SandboxPhysicalResource) {
@@ -170,108 +136,56 @@ async function deleteSandboxVolumeResource(resource: SandboxResourceDoc) {
   await deleteSessionVolume(claimName);
 }
 
-async function createWorkspaceArchive(params: {
+/**
+ * 构建沙盒工作区 `.tar.gz` 流式打包生成器（通过 split --filter 每次产出 8 MiB 分片，不在工作区落盘）。
+ */
+async function* createWorkspaceArchiveStream(params: {
   sandbox: ISandbox;
   workDirectory: string;
   sandboxId: string;
   assertValid: () => void;
   signal: AbortSignal;
-}) {
-  const { signal, sandbox, workDirectory, sandboxId } = params;
+}): AsyncGenerator<Buffer, void, unknown> {
+  const { signal, sandbox, workDirectory } = params;
   const maxArchiveBytes = getAgentSandboxArchiveMaxBytes();
-  const archivePath = joinSandboxPath(workDirectory, TEMP_ARCHIVE_FILE);
   const quotedWorkDirectory = shellQuote(workDirectory);
-  const quotedArchiveFile = shellQuote(TEMP_ARCHIVE_FILE);
-  const findExcludes = ARCHIVE_TEMP_FILE_NAMES.map(
-    (fileName) => `! -name ${shellQuote(fileName)}`
-  ).join(' ');
-  const zipExcludes = ARCHIVE_TEMP_FILE_NAMES.flatMap((fileName) => [
-    `-x ${shellQuote(fileName)}`,
-    `-x ${shellQuote(`*/${fileName}`)}`
-  ]).join(' ');
 
   await runSandboxCommand(sandbox, `mkdir -p ${quotedWorkDirectory}`, {
     signal,
     timeoutMs: SANDBOX_ARCHIVE_DIRECTORY_TIMEOUT_MS
   });
   params.assertValid();
-  await sandbox.deleteFiles([archivePath]).catch(() => undefined);
-  const [sizeResult, entryCountResult] = await Promise.all([
-    runSandboxCommand(
-      sandbox,
-      `cd ${quotedWorkDirectory} && find . -type f ${findExcludes} -ls 2>/dev/null | awk '{s+=$7} END {print s+0}'`,
-      { signal, timeoutMs: SANDBOX_ARCHIVE_COMMAND_TIMEOUT_MS, maxOutputBytes: 8 * 1024 }
-    ),
-    runSandboxCommand(
-      sandbox,
-      `cd ${quotedWorkDirectory} && find . -mindepth 1 ${findExcludes} 2>/dev/null | wc -l`,
-      { signal, timeoutMs: SANDBOX_ARCHIVE_COMMAND_TIMEOUT_MS, maxOutputBytes: 8 * 1024 }
-    )
-  ]);
-  const workspaceBytes = Number.parseInt(sizeResult.stdout.trim(), 10);
-  const entryCount = Number.parseInt(entryCountResult.stdout.trim(), 10);
-  if (Number.isFinite(entryCount) && entryCount === 0) return EMPTY_ZIP_BUFFER;
-  if (Number.isFinite(workspaceBytes) && workspaceBytes > maxArchiveBytes) {
-    throw new Error('Sandbox workspace is too large');
-  }
 
-  params.assertValid();
-  await runSandboxCommand(
+  yield* streamPackFromSandbox({
     sandbox,
-    `cd ${quotedWorkDirectory} && zip -r -y -q ${quotedArchiveFile} . ${zipExcludes}`,
-    { signal, timeoutMs: SANDBOX_ARCHIVE_COMMAND_TIMEOUT_MS, maxOutputBytes: 8 * 1024 }
-  );
-  const [archive] = await sandbox.readFiles([archivePath]);
-  if (archive.error) throw new Error(`Failed to read sandbox archive: ${archive.error.message}`);
-  const archiveBuffer = Buffer.from(archive.content);
-  if (archiveBuffer.byteLength > maxArchiveBytes) throw new Error('Sandbox archive is too large');
-  params.assertValid();
-  await sandbox.deleteFiles([archivePath]).catch((error) => {
-    logger.warn('Failed to cleanup sandbox archive temp file', { sandboxId, error });
+    workDirectory,
+    format: 'tar.gz',
+    maxBytes: maxArchiveBytes,
+    excludeFileNames: ARCHIVE_TEMP_FILE_NAMES,
+    allowEmpty: true,
+    rejectEscapingSymlinks: false,
+    signal,
+    assertValid: params.assertValid
   });
-  return archiveBuffer;
 }
 
 async function restoreWorkspaceArchive(params: {
   sandbox: ISandbox;
   workDirectory: string;
   sandboxId: string;
-  archiveBody: Buffer;
+  archiveBody: Buffer | Readable;
   assertValid: () => void;
   signal: AbortSignal;
 }) {
   const { signal, sandbox, workDirectory, sandboxId, archiveBody } = params;
-  const archivePath = joinSandboxPath(workDirectory, RESTORE_ARCHIVE_FILE);
-  const quotedWorkDirectory = shellQuote(workDirectory);
-  const quotedArchiveFile = shellQuote(RESTORE_ARCHIVE_FILE);
-  await runSandboxCommand(sandbox, `mkdir -p ${quotedWorkDirectory}`, {
+  await streamExtractTarGzIntoSandbox({
+    sandbox,
+    targetDirectory: workDirectory,
+    archiveStream: archiveBody,
+    maxUncompressedBytes: getAgentSandboxArchiveMaxBytes(),
+    clearTargetDirectory: true,
     signal,
-    timeoutMs: SANDBOX_ARCHIVE_DIRECTORY_TIMEOUT_MS
-  });
-  params.assertValid();
-  const [writeResult] = await sandbox.writeFiles([{ path: archivePath, data: archiveBody }]);
-  if (writeResult.error) {
-    throw new Error(`Failed to write sandbox archive: ${writeResult.error.message}`);
-  }
-  params.assertValid();
-  const command = archiveBody.equals(EMPTY_ZIP_BUFFER)
-    ? `cd ${quotedWorkDirectory} && find . -mindepth 1 -maxdepth 1 ! -name ${quotedArchiveFile} -exec rm -rf -- {} + && rm -f ${quotedArchiveFile}`
-    : [
-        `cd ${quotedWorkDirectory}`,
-        `unzip -Z -t ${quotedArchiveFile} | awk -v max=${getAgentSandboxArchiveMaxBytes()} 'BEGIN { ok=0 } /uncompressed,/ { ok=(($3 + 0) <= max) } END { exit ok ? 0 : 1 }'`,
-        `unzip -Z1 ${quotedArchiveFile} | awk 'BEGIN { ok=1 } /^\\// || /(^|\\/)\\.\\.($|\\/)/ { ok=0 } END { exit ok ? 0 : 1 }'`,
-        `find . -mindepth 1 -maxdepth 1 ! -name ${quotedArchiveFile} -exec rm -rf -- {} +`,
-        `unzip -o -q ${quotedArchiveFile} -d .`,
-        `rm -f ${quotedArchiveFile}`
-      ].join(' && ');
-  await runSandboxCommand(sandbox, command, {
-    signal,
-    timeoutMs: SANDBOX_ARCHIVE_COMMAND_TIMEOUT_MS,
-    maxOutputBytes: 8 * 1024
-  }).catch(async (error) => {
-    params.assertValid();
-    await sandbox.deleteFiles([archivePath]).catch(() => undefined);
-    throw error;
+    assertValid: params.assertValid
   });
   logger.info('Sandbox workspace restored from archive', { sandboxId });
 }
@@ -324,20 +238,32 @@ async function archiveSandboxWithinLease(params: {
             const connected = await connectSandboxForArchive(claimed, assertValid);
             sandbox = connected.sandbox;
             assertValid();
-            await ensureZipAvailableInSandbox(sandbox, lease.signal);
-            assertValid();
-            const body = await createWorkspaceArchive({
+            const archiveStream = createWorkspaceArchiveStream({
               sandbox,
               workDirectory: connected.profile.workDirectory,
               sandboxId: claimed.sandboxId,
               signal: lease.signal,
               assertValid
             });
-            assertValid();
-            await getS3SandboxSource().uploadWorkspaceArchive({
-              sandboxId: claimed.sandboxId,
-              body
-            });
+            const s3Source = getS3SandboxSource();
+            if (typeof s3Source.uploadWorkspaceArchiveStream === 'function') {
+              await s3Source.uploadWorkspaceArchiveStream({
+                sandboxId: claimed.sandboxId,
+                stream: archiveStream,
+                maxBytes: getAgentSandboxArchiveMaxBytes()
+              });
+            } else {
+              const chunks: Buffer[] = [];
+              for await (const chunk of archiveStream) {
+                chunks.push(chunk);
+              }
+              const body = chunks.length > 0 ? Buffer.concat(chunks) : EMPTY_TAR_GZ_BUFFER;
+              assertValid();
+              await s3Source.uploadWorkspaceArchive({
+                sandboxId: claimed.sandboxId,
+                body
+              });
+            }
           }
         },
         {
@@ -609,12 +535,18 @@ export async function restoreArchivedSandboxWithinLease(params: {
               });
               sandbox = target.sandbox;
               assertValid();
-              await ensureUnzipAvailableInSandbox(sandbox, lease.signal);
-              assertValid();
-              const body = await getS3SandboxSource().downloadWorkspaceArchive({
-                sandboxId: claimed.sandboxId,
-                maxBytes: getAgentSandboxArchiveMaxBytes()
-              });
+              const s3Source = getS3SandboxSource();
+              const maxBytes = getAgentSandboxArchiveMaxBytes();
+              const body =
+                typeof s3Source.downloadWorkspaceArchiveStream === 'function'
+                  ? await s3Source.downloadWorkspaceArchiveStream({
+                      sandboxId: claimed.sandboxId,
+                      maxBytes
+                    })
+                  : await s3Source.downloadWorkspaceArchive({
+                      sandboxId: claimed.sandboxId,
+                      maxBytes
+                    });
               assertValid();
               await restoreWorkspaceArchive({
                 sandbox,

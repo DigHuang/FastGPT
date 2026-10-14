@@ -12,6 +12,8 @@ import type { SandboxClient } from './runtime/client';
 import { getSandboxRuntimeProfile } from '../infrastructure/provider/runtimeProfile';
 import { readExternalFileBuffer } from '../../../../common/file/read/external';
 import { resolveSandboxRuntimePath } from '../utils';
+import { getAgentSandboxArchiveMaxBytes } from '../config';
+import { streamPackFromSandbox } from './streamArchive';
 
 export type SandboxUrlFile = {
   path: string;
@@ -164,6 +166,27 @@ export async function getSandboxFileContent(
     contentType,
     fileName
   };
+}
+
+/**
+ * 在容器内使用 `zip -r -y -q - . | split -b 8m --filter` 流式打包指定目录，
+ * 避免对深层目录执行 N+1 次 `listDirectory` 与 `readFileStream` 跨进程 RPC。
+ */
+export async function* streamDirectoryZipFromSandbox(params: {
+  sandbox: SandboxClient;
+  path: string;
+}): AsyncGenerator<Buffer, void, unknown> {
+  const providerDirPath = params.sandbox.resolveRuntimePath(params.path, {
+    allowAbsolutePath: true
+  });
+  yield* streamPackFromSandbox({
+    sandbox: params.sandbox.provider,
+    workDirectory: providerDirPath,
+    format: 'zip',
+    maxBytes: getAgentSandboxArchiveMaxBytes(),
+    allowEmpty: false,
+    rejectEscapingSymlinks: false
+  });
 }
 
 /**

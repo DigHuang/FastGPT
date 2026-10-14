@@ -54,15 +54,16 @@ Pro 可以提供平台内置的辅助生成 Skill 源码。运行时遵循以下
 
 ## 发布与运行
 
-### 发布
+### 发布与导入导出
 
-Skill 版本保存为不可变 ZIP 包并记录 storage key。发布校验在持久化版本前执行，失败时不生成可运行版本。
+- **S3 版本包存储统一为 `.tar.gz`**：Skill 保存发布时在沙盒内前置校验并提取 `SKILL.md` 元数据，随后通过 `tar | split --filter` 流式分片上传不可变 `.tar.gz` 版本包（`agent-skills/<teamId>/<skillId>/<versionId>.tar.gz`）并记录 `storageKey`。
+- **用户导入与导出保持 `.zip`**：用户从浏览器导入 `.zip` 时由服务端流式转换为 `.tar.gz` 存入 S3；导出 Skill 工作区时在沙盒内通过 `zip - | split --filter` 流式分片直传浏览器 HTTP 响应。存量 `.zip` 版本包通过 4.17.3 自动迁移任务与部署前按需转换兜底收敛为 `.tar.gz`。完整设计见 [Sandbox 与 Skill 全链路流式归档、发布、部署与下载设计](../sandbox/streaming-archive.md)。
 
 ### 普通 Agent 运行
 
 1. 根据 Agent 配置读取选中的 Skill。
 2. 校验团队和成员读取权限。
-3. 将当前发布版本注入会话 Sandbox。
+3. 将当前发布版本 `.tar.gz` 通过 `mkfifo + tar -xzf -` 流式注入会话 Sandbox（工作区零压缩包落盘）。
 4. 可选执行版本根目录的 `entrypoint.sh`。
 5. 扫描 `SKILL.md` 并把可用 Skill 信息注入当前轮 reminder。
 
@@ -72,7 +73,7 @@ Skill 版本保存为不可变 ZIP 包并记录 storage key。发布校验在持
 
 ## 安全边界
 
-- Skill ZIP 解压前校验总大小和路径穿越。
+- Skill 版本包流式解包后校验总大小、非法特殊设备节点和软链接路径逃逸（发布与导入时同步校验路径穿越与总大小）。
 - 部署前检查团队归属和成员读取权限。
 - 内置 Skill 不进入用户版本包。
 - entrypoint 在隔离 Sandbox 中执行，限制时间和输出；失败不标记为成功。

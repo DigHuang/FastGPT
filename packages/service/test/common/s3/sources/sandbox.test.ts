@@ -7,21 +7,25 @@ const createSourceWithoutConstructor = (exists: boolean) => {
   Object.defineProperty(source, 'client', {
     value: {
       uploadObject: vi.fn().mockResolvedValue(undefined),
-      downloadObject: vi.fn().mockResolvedValue({ body: Readable.from(Buffer.from('zip')) })
+      downloadObject: vi.fn().mockResolvedValue({ body: Readable.from(Buffer.from('tar.gz')) })
     }
   });
   source.removeObject = vi.fn().mockResolvedValue(undefined);
-  source.isObjectExists = vi.fn().mockResolvedValue(exists);
+  source.isObjectExists = vi
+    .fn()
+    .mockImplementation(async (key: string) =>
+      exists ? true : key === 'sandbox/archive/sandbox-1/package.tar.gz'
+    );
   return source;
 };
 
 describe('S3SandboxSource archive helpers', () => {
-  it('stores v2 archives under sandbox/archive', async () => {
+  it('stores v2 archives as package.tar.gz under sandbox/archive and cleans both .tar.gz and legacy .zip', async () => {
     const source = createSourceWithoutConstructor(false);
 
     await S3SandboxSource.prototype.uploadWorkspaceArchive.call(source, {
       sandboxId: 'sandbox-1',
-      body: Buffer.from('zip')
+      body: Buffer.from('tar.gz')
     });
     await S3SandboxSource.prototype.downloadWorkspaceArchive.call(source, {
       sandboxId: 'sandbox-1'
@@ -32,12 +36,17 @@ describe('S3SandboxSource archive helpers', () => {
     });
 
     expect(source.client.uploadObject).toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'sandbox/archive/sandbox-1/package.zip' })
+      expect.objectContaining({
+        key: 'sandbox/archive/sandbox-1/package.tar.gz',
+        contentType: 'application/gzip'
+      })
     );
     expect(source.client.downloadObject).toHaveBeenCalledWith({
-      key: 'sandbox/archive/sandbox-1/package.zip'
+      key: 'sandbox/archive/sandbox-1/package.tar.gz'
     });
+    expect(source.removeObject).toHaveBeenCalledWith('sandbox/archive/sandbox-2/package.tar.gz');
     expect(source.removeObject).toHaveBeenCalledWith('sandbox/archive/sandbox-2/package.zip');
+    expect(source.isObjectExists).toHaveBeenCalledWith('sandbox/archive/sandbox-2/package.tar.gz');
     expect(source.isObjectExists).toHaveBeenCalledWith('sandbox/archive/sandbox-2/package.zip');
   });
 

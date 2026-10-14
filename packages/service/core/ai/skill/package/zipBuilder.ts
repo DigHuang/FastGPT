@@ -14,6 +14,11 @@
  */
 
 import JSZip from 'jszip';
+import {
+  buildTarGzBuffer,
+  isGzipBuffer,
+  scanTarGzEntries
+} from '../../../../common/file/archive/tarGz';
 import { extractSkillNameFromSkillMd } from '../utils';
 import { DEFAULT_GITIGNORE_CONTENT } from './constants';
 
@@ -113,18 +118,17 @@ export async function createSkillPackage(params: CreateSkillPackageParams): Prom
 }
 
 /**
- * 创建新建 Skill 的空白工作区包。
+ * 创建新建 Skill 的空白工作区 `.tar.gz` 包。
  *
- * 初始版本只建立工作区外壳，不生成任何可执行 Skill。空目录在 ZIP 中需要显式写入，
- * 否则解压后 `skills/` 不会存在。
+ * 初始版本只建立工作区外壳（`.gitignore` 与空 `skills/` 目录），不生成任何可执行 Skill。
  */
 export async function createBlankSkillWorkspacePackage(): Promise<Buffer> {
-  const zip = new JSZip();
-
-  zip.file('.gitignore', DEFAULT_GITIGNORE_CONTENT);
-  zip.folder('skills');
-
-  return generateZipBuffer(zip);
+  return buildTarGzBuffer({
+    entries: [
+      { path: '.gitignore', type: 'file', content: DEFAULT_GITIGNORE_CONTENT },
+      { path: 'skills/', type: 'directory' }
+    ]
+  });
 }
 
 /**
@@ -157,7 +161,42 @@ async function generateZipBuffer(zip: JSZip): Promise<Buffer> {
 }
 
 /**
- * 校验 skill ZIP 包结构。
+ * 统一枚举 `.tar.gz` 或 `.zip` 归档中的条目路径与总解压字节数。
+ */
+async function collectArchiveSafetyEntries(
+  archiveBuffer: Buffer,
+  options: { maxUncompressedBytes?: number } = {}
+): Promise<ZipSafetyValidationResult> {
+  if (isGzipBuffer(archiveBuffer)) {
+    const files: string[] = [];
+    const { totalUncompressedBytes } = await scanTarGzEntries({
+      source: archiveBuffer,
+      maxUncompressedBytes: options.maxUncompressedBytes,
+      shouldReadContent: () => false,
+      onEntry: (entry) => {
+        files.push(entry.type === 'directory' ? `${entry.path}/` : entry.path);
+      }
+    });
+    if (files.length === 0) {
+      return {
+        valid: false,
+        files,
+        error: 'ZIP archive is empty'
+      };
+    }
+    return {
+      valid: true,
+      files,
+      totalUncompressedBytes
+    };
+  }
+
+  const zip = await JSZip.loadAsync(archiveBuffer);
+  return validateZipSafety(zip, options);
+}
+
+/**
+ * 校验 skill 包结构（同时兼容 `.tar.gz` 与 `.zip`）。
  *
  * 兼容两种形态：历史单 skill 包（一个 SKILL.md）和多 skill 包（多个一级目录各自含 SKILL.md）。
  */
@@ -166,8 +205,7 @@ export async function validateZipStructure(
   options: { maxUncompressedBytes?: number } = {}
 ): Promise<ZipValidationResult> {
   try {
-    const zip = await JSZip.loadAsync(zipBuffer);
-    const safety = validateZipSafety(zip, options);
+    const safety = await collectArchiveSafetyEntries(zipBuffer, options);
     const files = safety.files;
 
     if (!safety.valid) {
@@ -224,7 +262,7 @@ export async function validateZipStructure(
 }
 
 /**
- * 发布/保存版本时校验可部署工作区。
+ * 发布/保存版本时校验可部署工作区（同时支持 `.tar.gz` 与 `.zip`）。
  *
  * 这里只校验 workspace 级最小结构，不解析 SKILL.md frontmatter。创建阶段的空白初始包
  * 不应调用该校验；用户主动发布时必须至少存在一个可执行 Skill 目录。
@@ -234,8 +272,7 @@ export async function validateDeployableSkillWorkspacePackage(
   options: { maxUncompressedBytes?: number } = {}
 ): Promise<DeployableSkillWorkspaceValidationResult> {
   try {
-    const zip = await JSZip.loadAsync(zipBuffer);
-    const safety = validateZipSafety(zip, options);
+    const safety = await collectArchiveSafetyEntries(zipBuffer, options);
     const files = safety.files;
 
     if (!safety.valid) {

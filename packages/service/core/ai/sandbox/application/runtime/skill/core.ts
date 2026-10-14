@@ -7,7 +7,7 @@ import type { ISandbox } from '@fastgpt-sdk/sandbox-adapter';
 import { shellQuote } from '@fastgpt/global/common/string/utils';
 import { MongoAgentSkills } from '../../../../skill/model/schema';
 import { MongoAgentSkillsVersion } from '../../../../skill/version/schema';
-import { downloadSkillPackageStream } from '../../../../skill/package';
+import { downloadSkillPackageStream, ensureTarGzSkillPackage } from '../../../../skill/package';
 import { parseSkillMarkdown } from '../../../../skill/utils';
 import { getLogger, LogCategories } from '../../../../../../common/logger';
 import type { DeployedSkillInfo, DeployedSkillVersion } from './types';
@@ -20,7 +20,7 @@ import { getWorkflowResourceContext } from '../../../../../workflow/utils/contex
 import { assertWorkflowResource } from '../../../../../workflow/utils/resource';
 import { SkillErrEnum } from '@fastgpt/global/common/error/code/skill';
 import { Types } from '../../../../../../common/mongo';
-import { Readable } from 'node:stream';
+import { streamExtractTarGzIntoSandbox } from '../../streamArchive';
 
 const logger = getLogger(LogCategories.MODULE.AI.AGENT);
 const parseCommandOutputNulls = (stdout: string) => stdout.split('\0').filter(Boolean);
@@ -306,70 +306,42 @@ export const injectAgentSkillFilesToSandbox = async ({
         .toString(36)
         .slice(2)}`
     );
-    const zipPath = joinSandboxPath(tempDir, 'package.zip');
-    const quotedZipPath = shellQuote(zipPath);
-    const unzipCommand = `(${[
-      `unzip -Z -t ${quotedZipPath} | awk -v max=${maxPackageBytes} 'BEGIN { ok=0 } /uncompressed,/ { ok=(($3 + 0) <= max) } END { exit ok ? 0 : 1 }'`,
-      `unzip -Z1 ${quotedZipPath} | awk 'BEGIN { ok=1 } /^\\// || /(^|\\/)\\.\\.($|\\/)/ { ok=0 } END { exit ok ? 0 : 1 }'`,
-      `unzip -o -q ${quotedZipPath} -d ${shellQuote(tempDir)}`
-    ].join(' && ')})`;
 
     return {
+      versionId,
       storageKey: version.storageKey,
       targetDir,
-      tempDir,
-      zipPath,
-      unzipCommand
+      tempDir
     };
   });
 
-  // 1. Stream each ZIP package directly to its temporary directory.
+  // 1. Stream each .tar.gz skill package directly into its temporary staging directory via FIFO.
   if (results.length > 0) {
     const tempDirs = results.map(({ tempDir }) => tempDir);
     const cleanupTempDirs = () => sandbox.deleteDirectories(tempDirs).catch(() => undefined);
     await sandbox.createDirectories(tempDirs);
 
     try {
-      for (const { storageKey, zipPath } of results) {
-        const packageStream = await downloadSkillPackageStream({ storageKey });
-        try {
-          const [writeResult] = await sandbox.writeFiles([
-            {
-              path: zipPath,
-              data: Readable.toWeb(packageStream) as ReadableStream<Uint8Array>
-            }
-          ]);
-          if (writeResult?.error) {
-            throw new Error(`Failed to write skill ZIP package: ${writeResult.error.message}`);
-          }
-        } finally {
-          if (!packageStream.destroyed) packageStream.destroy();
-        }
+      for (const { versionId, storageKey, tempDir } of results) {
+        const resolvedStorageKey = await ensureTarGzSkillPackage({
+          versionId,
+          storageKey
+        });
+        const packageStream = await downloadSkillPackageStream({ storageKey: resolvedStorageKey });
+        await streamExtractTarGzIntoSandbox({
+          sandbox,
+          targetDirectory: tempDir,
+          archiveStream: packageStream,
+          maxUncompressedBytes: maxPackageBytes,
+          clearTargetDirectory: true
+        });
       }
     } catch (error) {
       await cleanupTempDirs();
       throw error;
     }
 
-    // 2. Execute a single unified decompression command inside the sandbox container
-    const finalUnzipCmd = results.map(({ unzipCommand }) => unzipCommand).join(' && ');
-    const extractResult = await sandbox.execute(finalUnzipCmd);
-    if (extractResult.exitCode !== 0) {
-      await cleanupTempDirs();
-      throw new Error(
-        `Failed to decompress skill packages inside sandbox: ${extractResult.stderr}`
-      );
-    }
-
-    const deleteResults = await sandbox.deleteFiles(results.map(({ zipPath }) => zipPath));
-    const failedDelete = deleteResults.find((result) => result.error || !result.success);
-    if (failedDelete) {
-      await cleanupTempDirs();
-      throw new Error(
-        `Failed to remove extracted skill ZIP ${failedDelete.path}: ${failedDelete.error?.message ?? 'delete failed'}`
-      );
-    }
-
+    // 2. Atomically move extracted temporary directories into final version targetDirs
     try {
       await sandbox.moveFiles(
         results.map(({ tempDir, targetDir }) => ({ source: tempDir, destination: targetDir }))

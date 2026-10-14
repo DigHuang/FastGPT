@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Readable } from 'node:stream';
 
 const mocks = vi.hoisted(() => ({
-  downloadSkillPackageStream: vi.fn()
+  downloadSkillPackageStream: vi.fn(),
+  ensureTarGzSkillPackage: vi.fn()
 }));
 
 vi.mock('@fastgpt/service/core/ai/skill/package', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@fastgpt/service/core/ai/skill/package')>()),
-  downloadSkillPackageStream: mocks.downloadSkillPackageStream
+  downloadSkillPackageStream: mocks.downloadSkillPackageStream,
+  ensureTarGzSkillPackage: mocks.ensureTarGzSkillPackage
 }));
 
 import { deploySkillPackage } from '@fastgpt/service/core/ai/sandbox/application/runtime/skill/prepare';
@@ -21,12 +23,16 @@ const successResult = {
 describe('skill package streaming prepare', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.ensureTarGzSkillPackage.mockImplementation(
+      async ({ storageKey }: { storageKey: string }) => storageKey
+    );
   });
 
-  it('streams the S3 package into sandbox.writeFiles', async () => {
+  it('streams the S3 .tar.gz package into sandbox FIFO and extracts without intermediate archive files', async () => {
     const source = Readable.from([Buffer.from('chunk-1'), Buffer.from('chunk-2')]);
     mocks.downloadSkillPackageStream.mockResolvedValue(source);
-    let uploaded = Buffer.alloc(0);
+    const uploadedChunks: Buffer[] = [];
+    const fifoPaths: string[] = [];
     const sandbox = {
       createDirectories: vi.fn().mockResolvedValue(undefined),
       deleteFiles: vi.fn(async (paths: string[]) =>
@@ -34,23 +40,20 @@ describe('skill package streaming prepare', () => {
       ),
       getFileInfo: vi.fn(async () => new Map()),
       execute: vi.fn().mockResolvedValue(successResult),
-      writeFiles: vi.fn(async ([entry]: Array<{ path: string; data: ReadableStream | string }>) => {
+      writeFiles: vi.fn(async ([entry]: Array<{ path: string; data: Buffer | string }>) => {
         if (entry.path === '/workspace/.gitignore') {
           return [{ path: entry.path, bytesWritten: String(entry.data).length, error: null }];
         }
-
-        expect(entry.path).toBe('/workspace/skills/package.zip');
-        if (!(entry.data instanceof ReadableStream)) {
-          throw new Error('Expected package upload to use a ReadableStream');
+        if (entry.path.endsWith('/input.eof')) {
+          return [{ path: entry.path, bytesWritten: 0, error: null }];
         }
 
-        const chunks: Buffer[] = [];
-        for await (const chunk of entry.data) {
-          chunks.push(Buffer.from(chunk));
-        }
-        uploaded = Buffer.concat(chunks);
+        expect(entry.path).toMatch(/^\/tmp\/\.fastgpt-restore-.*\/stream\.pipe$/);
+        fifoPaths.push(entry.path);
+        const buf = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(String(entry.data));
+        uploadedChunks.push(buf);
 
-        return [{ path: entry.path, bytesWritten: uploaded.length, error: null }];
+        return [{ path: entry.path, bytesWritten: buf.length, error: null }];
       })
     };
     const baseContext = {
@@ -59,18 +62,24 @@ describe('skill package streaming prepare', () => {
     };
 
     await deploySkillPackage({
-      storageKey: 'version.zip',
+      storageKey: 'version.tar.gz',
       skillsRootPath: '/workspace/skills'
     })(baseContext);
 
-    expect(mocks.downloadSkillPackageStream).toHaveBeenCalledWith({ storageKey: 'version.zip' });
-    expect(uploaded.toString()).toBe('chunk-1chunk-2');
+    expect(mocks.ensureTarGzSkillPackage).toHaveBeenCalledWith({ storageKey: 'version.tar.gz' });
+    expect(mocks.downloadSkillPackageStream).toHaveBeenCalledWith({ storageKey: 'version.tar.gz' });
+    expect(Buffer.concat(uploadedChunks).toString()).toBe('chunk-1chunk-2');
+    expect(fifoPaths.length).toBeGreaterThan(0);
     expect(source.destroyed).toBe(true);
     expect(sandbox.createDirectories).toHaveBeenCalledWith(['/workspace/skills']);
-    expect(sandbox.execute).toHaveBeenCalledWith(expect.stringContaining('unzip -Z1'), {
-      workingDirectory: '/workspace'
-    });
-    expect(sandbox.deleteFiles).toHaveBeenCalledWith(['/workspace/skills/package.zip']);
+    expect(sandbox.execute).toHaveBeenCalledWith(
+      expect.stringContaining('mkfifo'),
+      expect.objectContaining({ timeoutMs: 600_000 })
+    );
+    expect(sandbox.execute).toHaveBeenCalledWith(
+      expect.stringContaining('tar -xf - -C "$1" --no-same-owner --no-same-permissions'),
+      expect.objectContaining({ timeoutMs: 600_000 })
+    );
     expect(sandbox.getFileInfo).toHaveBeenCalledWith(['/workspace/.gitignore']);
     expect(sandbox.writeFiles).toHaveBeenLastCalledWith([
       {
@@ -80,7 +89,7 @@ describe('skill package streaming prepare', () => {
     ]);
   });
 
-  it('destroys an unconsumed S3 stream when sandbox upload fails', async () => {
+  it('destroys an unconsumed S3 stream when sandbox FIFO write fails', async () => {
     const source = Readable.from([Buffer.from('content')]);
     mocks.downloadSkillPackageStream.mockResolvedValue(source);
     const sandbox = {
@@ -88,18 +97,18 @@ describe('skill package streaming prepare', () => {
       execute: vi.fn().mockResolvedValue(successResult),
       writeFiles: vi.fn().mockResolvedValue([
         {
-          path: '/workspace/skills/package.zip',
+          path: '/tmp/.fastgpt-restore-1/stream.pipe',
           bytesWritten: 0,
           error: new Error('upload failed')
         }
       ])
     };
     await expect(
-      deploySkillPackage({ storageKey: 'version.zip', skillsRootPath: '/workspace/skills' })({
+      deploySkillPackage({ storageKey: 'version.tar.gz', skillsRootPath: '/workspace/skills' })({
         sandbox: sandbox as any,
         workDirectory: '/workspace'
       })
-    ).rejects.toThrow('Failed to write skill package ZIP');
+    ).rejects.toThrow('Failed to write archive stream to sandbox: upload failed');
     expect(source.destroyed).toBe(true);
   });
 });

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { isGzipBuffer } from '@fastgpt/service/common/file/archive/tarGz';
 import {
   SANDBOX_EDIT_FILE_TOOL_NAME,
   SANDBOX_FIND_TOOL_NAME,
@@ -317,11 +319,42 @@ describe.skipIf(!integrationProvider).sequential('FastGPT Sandbox Integration', 
   beforeAll(async () => {
     global.sandboxBucket = {
       deleteWorkspaceArchiveNow,
-      // 对象存储使用内存替身；Mongo、Redis、Provider、PVC 和 zip/unzip 均执行真实链路。
-      uploadWorkspaceArchive: async ({ sandboxId, body }: { sandboxId: string; body: Buffer }) => {
-        workspaceArchives.set(sandboxId, Buffer.from(body));
+      // 对象存储使用内存替身；Mongo、Redis、Provider、PVC 和 tar.gz 流式打包/FIFO 解压均执行真实链路。
+      uploadWorkspaceArchive: async ({
+        sandboxId,
+        body
+      }: {
+        sandboxId: string;
+        body: Buffer | Readable | AsyncIterable<Buffer | Uint8Array>;
+      }) => {
+        if (Buffer.isBuffer(body)) {
+          workspaceArchives.set(sandboxId, Buffer.from(body));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of body) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        workspaceArchives.set(sandboxId, Buffer.concat(chunks));
       },
-      downloadWorkspaceArchive
+      uploadWorkspaceArchiveStream: async ({
+        sandboxId,
+        stream
+      }: {
+        sandboxId: string;
+        stream: Readable | AsyncIterable<Buffer | Uint8Array>;
+      }) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        workspaceArchives.set(sandboxId, Buffer.concat(chunks));
+      },
+      downloadWorkspaceArchive,
+      downloadWorkspaceArchiveStream: async ({ sandboxId }: { sandboxId: string }) => {
+        const buf = await downloadWorkspaceArchive({ sandboxId });
+        return Readable.from([buf]);
+      }
     } as unknown as typeof global.sandboxBucket;
 
     toolFixture = await createSandboxFixture(provider, 'tool-runtime', resourceLimits);
@@ -833,6 +866,7 @@ describe.skipIf(!integrationProvider).sequential('FastGPT Sandbox Integration', 
           await fixture.sandbox.provider.close();
           const originalArchive = workspaceArchives.get(query.sandboxId);
           expect(originalArchive).toBeInstanceOf(Buffer);
+          expect(isGzipBuffer(originalArchive!)).toBe(true);
 
           // 故障发生在真实计算资源/PVC 创建后、解压前，不 mock 生命周期、数据库或 Redis。
           downloadWorkspaceArchive.mockRejectedValueOnce(

@@ -9,6 +9,7 @@ import {
   standardizeSkillPackageBySkillMdName,
   extractRuntimeSkillsFromPackage
 } from '@fastgpt/service/core/ai/skill/package';
+import { isGzipBuffer, parseTarGzEntries } from '@fastgpt/service/common/file/archive/tarGz';
 
 describe('zipBuilder', () => {
   // ==================== createSkillPackage ====================
@@ -117,19 +118,19 @@ ${largeMarkdown}`;
 
   // ==================== createBlankSkillWorkspacePackage ====================
   describe('createBlankSkillWorkspacePackage', () => {
-    it('should create an initial blank workspace with .gitignore and empty skills directory', async () => {
-      const zipBuffer = await createBlankSkillWorkspacePackage();
+    it('should create an initial blank .tar.gz workspace with .gitignore and empty skills directory', async () => {
+      const tarGzBuffer = await createBlankSkillWorkspacePackage();
 
-      expect(Buffer.isBuffer(zipBuffer)).toBe(true);
-      expect(zipBuffer.length).toBeGreaterThan(0);
+      expect(Buffer.isBuffer(tarGzBuffer)).toBe(true);
+      expect(isGzipBuffer(tarGzBuffer)).toBe(true);
 
-      const zip = await JSZip.loadAsync(zipBuffer);
-      const files = Object.keys(zip.files);
+      const entries = await parseTarGzEntries({ source: tarGzBuffer });
+      const paths = entries.map((entry) => entry.path);
 
-      expect(files).toContain('.gitignore');
-      expect(files).toContain('skills/');
-      expect(files).not.toContain('skills/SKILL.md');
-      expect(files.some((file) => /^skills\/[^/]+\/SKILL\.md$/i.test(file))).toBe(false);
+      expect(paths).toContain('.gitignore');
+      expect(paths).toContain('skills');
+      expect(paths).not.toContain('skills/SKILL.md');
+      expect(paths.some((file) => /^skills\/[^/]+\/SKILL\.md$/i.test(file))).toBe(false);
     });
   });
 

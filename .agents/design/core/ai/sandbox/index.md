@@ -2,13 +2,16 @@
 
 状态：当前实现
 
-最后核对：2026-10-09
+最后核对：2026-10-14
 
 用户级实例、生命周期、Legacy 迁移以及本分支后续变更的最终契约统一见
 [用户级 Sandbox 最终方案](./user-level-sandbox.md)。本文只维护当前代码入口和运行行为索引。
 
 OpenSandbox Kubernetes PVC 的问题定论、生命周期设计和验证记录统一见
 [OpenSandbox Kubernetes PVC 生命周期问题与设计](./opensandbox-pvc-lifecycle.md)。
+
+Sandbox 冷归档与恢复的零完整包落盘流式 `tar.gz` 方案及存量 `.zip` 迁移设计统一见
+[Sandbox 流式归档与恢复设计方案](./streaming-archive.md)。
 
 ## 目标与边界
 
@@ -195,7 +198,7 @@ Skill Edit 复用编辑器 Sandbox 中的当前工作区，不把编辑中的内
 - App chat 删除只清理聊天记录和 chat S3 文件，不删除共享 Sandbox，也不清理 Sandbox 内的 `sessions/<chatId>` 目录。
 - App 删除清理该 source 下全部用户级 v2 与 Legacy Sandbox，包括 Provider 实例、Mongo 记录、可选 volume 和 S3 归档。
 - Skill 删除清理 Skill Edit 相关 Sandbox；普通编辑聊天删除不直接删除共享 edit-debug Sandbox。
-- stopped 实例可进入冷归档；恢复时通过 archive 状态机避免与归档、删除并发。
+- stopped 实例可进入冷归档（统一使用流式 `package.tar.gz`，存量 `.zip` 通过后台迁移任务与恢复前按需转换兜底收敛，详见 [Sandbox 流式归档与恢复设计方案](./streaming-archive.md)）；恢复时通过 archive 状态机避免与归档、删除并发。
 - keepalive 只刷新 running 实例；stopped、stopping、不存在或 archived 状态均幂等结束，不创建、恢复或
   返回生命周期错误。只读存在性检查同样不能拉起 archived Sandbox。
 

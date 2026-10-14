@@ -30,17 +30,17 @@ describe('agent sandbox config', () => {
 
   it('derives all size limits from AGENT_SANDBOX_STORAGE_SIZE_GI', () => {
     serviceEnv.AGENT_SANDBOX_STORAGE_SIZE_GI = 1;
-    expect(getAgentSandboxArchiveMaxBytes()).toBe(362 * 1024 * 1024);
-    expect(getAgentSandboxDiskBytes()).toBe(362 * 1024 * 1024);
-    expect(getAgentSandboxSkillMaxBytes()).toBe(362 * 1024 * 1024);
-    expect(getAgentSandboxMaxFileBytes()).toBe(362 * 1024 * 1024);
+    expect(getAgentSandboxArchiveMaxBytes()).toBe(874 * 1024 * 1024);
+    expect(getAgentSandboxDiskBytes()).toBe(874 * 1024 * 1024);
+    expect(getAgentSandboxSkillMaxBytes()).toBe(874 * 1024 * 1024);
+    expect(getAgentSandboxMaxFileBytes()).toBe(874 * 1024 * 1024);
 
     serviceEnv.AGENT_SANDBOX_STORAGE_SIZE_GI = 2;
-    expect(getAgentSandboxDiskBytes()).toBe(874 * 1024 * 1024);
+    expect(getAgentSandboxDiskBytes()).toBe(1898 * 1024 * 1024);
   });
 
   it('rejects storage sizes without enough space for the reserved system capacity', () => {
-    serviceEnv.AGENT_SANDBOX_STORAGE_SIZE_GI = 0.29;
+    serviceEnv.AGENT_SANDBOX_STORAGE_SIZE_GI = 0.14;
     expect(() => getAgentSandboxDiskBytes()).toThrow('AGENT_SANDBOX_STORAGE_SIZE_GI');
   });
 

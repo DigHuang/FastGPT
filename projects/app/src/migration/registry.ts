@@ -24,6 +24,7 @@ import { backfillMemberNameSet } from './tasks/4171/20260928_backfill_member_nam
 import { migrateDatasetRebuildStatus } from './tasks/4171/20261009_migrate_dataset_rebuild_status';
 import { migrateChunkTraining } from './tasks/4171/20261008_migrate_chunk_training';
 import { backfillAgentSandboxTeamId } from './tasks/4173/20261009_backfill_agent_sandbox_team_id';
+import { migrateSandboxArchiveTarGz } from './tasks/4173/20261014_migrate_sandbox_archive_tar_gz';
 
 export type SystemMigrationLogger = {
   info: (message: string, metadata?: Record<string, unknown>) => void;
@@ -543,6 +544,40 @@ export const systemMigrations = [
     blockStartup: false,
     onFailure: SystemMigrationFailurePolicyEnum.continue,
     run: backfillAgentSandboxTeamId
+  },
+  {
+    id: '20261014_migrate_sandbox_archive_tar_gz',
+    version: '4.17.3',
+    nameKey: i18nT('system_migration:migrations.20261014_migrate_sandbox_archive_tar_gz.name'),
+    descriptionKey: i18nT(
+      'system_migration:migrations.20261014_migrate_sandbox_archive_tar_gz.description'
+    ),
+    resultKey: i18nT('system_migration:migrations.20261014_migrate_sandbox_archive_tar_gz.result'),
+    progressSteps: [
+      {
+        key: 'sandbox_archives',
+        labelKey: i18nT(
+          'system_migration:migrations.20261014_migrate_sandbox_archive_tar_gz.sandbox_archives'
+        )
+      },
+      {
+        key: 'skill_packages',
+        labelKey: i18nT(
+          'system_migration:migrations.20261014_migrate_sandbox_archive_tar_gz.skill_packages'
+        )
+      },
+      {
+        key: 'validation',
+        labelKey: i18nT(
+          'system_migration:migrations.20261014_migrate_sandbox_archive_tar_gz.validation'
+        )
+      }
+    ],
+    // 与运行期按需懒迁移（ensureTarGzWorkspaceArchive / ensureTarGzSkillPackage）共享幂等转换逻辑，
+    // 不阻塞启动，后台主动收敛存量 .zip 归档与技能包。
+    blockStartup: false,
+    onFailure: SystemMigrationFailurePolicyEnum.continue,
+    run: migrateSandboxArchiveTarGz
   }
 ] as const satisfies readonly SystemMigration[];
 

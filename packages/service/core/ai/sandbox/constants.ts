@@ -134,6 +134,9 @@ export const MB_BYTES = 1024 * 1024;
 export const RESERVED_DISK_MB = 150;
 export const MAX_ARCHIVE_DEPTH = 20;
 export const SESSION_VOLUME_GENERATION_LENGTH = 8;
+export const SANDBOX_ARCHIVE_STREAM_CHUNK_BYTES = 8 * MB_BYTES;
+export const SANDBOX_ARCHIVE_STREAM_MAX_READY_PARTS = 2;
+export const SANDBOX_ARCHIVE_MAX_ENTRIES = 100_000;
 
 // Skill Edit 对外错误约定
 export const SKILL_EDIT_SANDBOX_NOT_RUNNING_ERROR = 'Edit sandbox not found or not running';

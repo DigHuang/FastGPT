@@ -1,17 +1,27 @@
 /**
  * Skill 包对象存储服务。
  *
- * 只负责 Skill ZIP 包和编辑会话制品在私有对象存储中的读写、复制、存在性检查和清理。
- * 包内容解析放在 package/zipBuilder，版本落库放在 version 模块。
+ * 负责 Skill `.tar.gz` 版本包在私有对象存储中的读写、服务端拷贝、存量 `.zip -> .tar.gz` 转换、
+ * 存在性检查和清理。
  */
 
-import { getS3SkillSource } from '../../../../common/s3/sources/skill';
+import { Readable } from 'node:stream';
+import {
+  getS3SkillSource,
+  getSkillPackageKey,
+  toTarGzSkillStorageKey
+} from '../../../../common/s3/sources/skill';
 import { SkillErrEnum } from '@fastgpt/global/common/error/code/skill';
 import type { ClientSession } from '../../../../common/mongo';
 import { getAgentSandboxSkillMaxBytes } from '../../sandbox/config';
 import { readStreamToBuffer } from '../../../../common/s3/utils';
-import type { Readable } from 'node:stream';
 import { createSizeLimitedStream } from '../../../../common/file/stream';
+import {
+  convertZipBufferToTarGzBuffer,
+  convertZipStreamToTarGzStream,
+  isZipBuffer
+} from '../../../../common/file/archive/tarGz';
+import { MongoAgentSkillsVersion } from '../version/schema';
 
 export type SkillStorageInfo = {
   key: string;
@@ -28,15 +38,16 @@ export type DownloadSkillPackageParams = {
   storageKey: string;
 };
 
-type UploadSkillPackageStreamParams = Omit<UploadSkillPackageParams, 'zipBuffer'> & {
-  packageStream: Readable;
+export type UploadSkillPackageStreamParams = Omit<UploadSkillPackageParams, 'zipBuffer'> & {
+  packageStream: Readable | AsyncIterable<Buffer | Uint8Array>;
   contentLength?: number;
 };
 
 /**
- * 上传 Skill ZIP 包到私有对象存储。
+ * 上传 Skill 版本包 Buffer 到私有对象存储（统一存储为 `.tar.gz` key）。
  *
- * 对象 key 由 S3SkillSource 统一生成，业务读取仍以数据库版本记录为准。
+ * 若调用方传入的是 `.zip` Buffer（如旧测试 fixture），会自动转换为 `.tar.gz` 后再落盘，
+ * 确保 `.tar.gz` key 下的内容始终是合法 gzip/tar 流。
  */
 export async function uploadSkillPackage(
   params: UploadSkillPackageParams
@@ -48,20 +59,28 @@ export async function uploadSkillPackage(
     throw new Error(SkillErrEnum.archiveTooLarge);
   }
 
+  const normalizedBuffer = isZipBuffer(zipBuffer)
+    ? await convertZipBufferToTarGzBuffer(zipBuffer, { maxUncompressedBytes: maxBytes })
+    : zipBuffer;
+
+  if (normalizedBuffer.length > maxBytes) {
+    throw new Error(SkillErrEnum.archiveTooLarge);
+  }
+
   const bucket = getS3SkillSource();
 
   const { key } = await bucket.uploadPackage({
     teamId,
     skillId,
     packageObjectId,
-    body: zipBuffer
+    body: normalizedBuffer
   });
 
   return { key };
 }
 
 /**
- * 将 Skill ZIP 流直接上传到私有对象存储。
+ * 将 Skill 版本包流（Readable 或分片 AsyncIterable）直接上传到私有对象存储。
  *
  * contentLength 仅透传对象存储 SDK；实际传输仍逐块计数，防止伪造长度绕过限制。
  */
@@ -71,8 +90,11 @@ export async function uploadSkillPackageStream(
   const { teamId, skillId, packageObjectId, packageStream, contentLength } = params;
   const maxBytes = getAgentSandboxSkillMaxBytes();
 
+  const readableStream =
+    packageStream instanceof Readable ? packageStream : Readable.from(packageStream);
+
   const boundedStream = createSizeLimitedStream({
-    stream: packageStream,
+    stream: readableStream,
     maxBytes,
     createExceededError: () => new Error(SkillErrEnum.archiveTooLarge)
   });
@@ -83,7 +105,9 @@ export async function uploadSkillPackageStream(
     skillId,
     packageObjectId,
     body: boundedStream,
-    contentLength
+    contentLength,
+    maxBytes,
+    createExceededError: () => new Error(SkillErrEnum.archiveTooLarge)
   });
 
   return { key };
@@ -104,7 +128,7 @@ export async function removeSkillPackageTTL(
 }
 
 /**
- * 从私有对象存储下载 Skill ZIP 包。
+ * 从私有对象存储下载 Skill 版本包 Buffer。
  *
  * 下载过程中按流式累计大小，超过 Skill sandbox 包大小上限即中断，避免异常大包撑爆内存。
  */
@@ -130,7 +154,7 @@ export async function downloadSkillPackage(params: DownloadSkillPackageParams): 
 }
 
 /**
- * 从私有对象存储返回带实际字节上限的 Skill ZIP 流。
+ * 从私有对象存储返回带实际字节上限的 Skill 版本包流。
  *
  * 上限在消费流时逐块执行，避免对象元数据缺失或被错误填写时把超大包继续传入 Sandbox。
  */
@@ -156,7 +180,65 @@ export async function downloadSkillPackageStream(
 }
 
 /**
- * 删除单个版本的 Skill ZIP 包。
+ * 确保指定 Skill 版本包在 S3 中为 `.tar.gz` 格式：
+ * 1. 若 `storageKey` 已以 `.tar.gz` 结尾，直接返回；
+ * 2. 若 `storageKey` 仍以 `.zip` 结尾，通过 `yauzl` 流式转换为 `.tar.gz` 上传至 S3，
+ *    通过 CAS 更新 `MongoAgentSkillsVersion.storageKey` 后删除旧 `.zip` 对象。
+ */
+export async function ensureTarGzSkillPackage(params: {
+  versionId?: string;
+  storageKey: string;
+}): Promise<string> {
+  const { versionId, storageKey } = params;
+  if (!storageKey.toLowerCase().endsWith('.zip')) {
+    return storageKey;
+  }
+
+  const bucket = getS3SkillSource();
+  if (typeof bucket.uploadConfirmedTarGzByKey !== 'function') {
+    return storageKey;
+  }
+
+  const newTarGzKey = toTarGzSkillStorageKey(storageKey);
+  const maxBytes = getAgentSandboxSkillMaxBytes();
+  const targetExists = await checkSkillPackageExists(newTarGzKey);
+
+  if (!targetExists) {
+    const zipStream = await downloadSkillPackageStream({ storageKey });
+    const tarGzStream = await convertZipStreamToTarGzStream({
+      zipStream,
+      maxCompressedBytes: maxBytes,
+      options: {
+        maxUncompressedBytes: maxBytes
+      }
+    });
+
+    await bucket.uploadConfirmedTarGzByKey({
+      key: newTarGzKey,
+      body: tarGzStream,
+      maxBytes
+    });
+  }
+
+  await MongoAgentSkillsVersion.updateOne(
+    {
+      ...(versionId ? { _id: versionId } : {}),
+      storageKey
+    },
+    {
+      $set: {
+        storageKey: newTarGzKey
+      }
+    }
+  ).catch(() => undefined);
+
+  await deleteSkillPackage(storageKey).catch(() => undefined);
+
+  return newTarGzKey;
+}
+
+/**
+ * 删除单个版本的 Skill 包。
  */
 export async function deleteSkillPackage(storageKey: string): Promise<void> {
   const bucket = getS3SkillSource();
@@ -177,7 +259,7 @@ export function deleteSkillAllPackages(teamId: string, skillId: string): Promise
 }
 
 /**
- * 检查 Skill ZIP 包是否存在。
+ * 检查 Skill 包是否存在。
  *
  * 对象存储异常时保守返回 false，避免调用方误以为包可下载。
  */
@@ -198,16 +280,30 @@ export async function checkSkillPackageExists(storageKey: string): Promise<boole
 /**
  * 复制 Skill 包到新版本位置。
  *
- * 当前对象存储封装没有直接 copy API，因此这里下载后重新上传；调用方应避免在大批量迁移中使用。
+ * 优先确保源包已为 `.tar.gz`，并使用 S3 服务端 `copy`（写临时 TTL）实现 0 内存开销拷贝；
+ * 若测试环境未提供 `bucket.copy`，回退到下载再上传。
  */
 export async function copySkillPackage(
   sourceStorageKey: string,
   targetParams: Omit<UploadSkillPackageParams, 'zipBuffer'>
 ): Promise<SkillStorageInfo> {
-  const zipBuffer = await downloadSkillPackage({ storageKey: sourceStorageKey });
+  const resolvedSourceKey = await ensureTarGzSkillPackage({ storageKey: sourceStorageKey });
+  const bucket = getS3SkillSource();
+
+  if (typeof bucket.copy === 'function') {
+    const key = getSkillPackageKey(targetParams);
+    await bucket.copy({
+      from: resolvedSourceKey,
+      to: key,
+      options: { temporary: true }
+    });
+    return { key };
+  }
+
+  const packageBuffer = await downloadSkillPackage({ storageKey: resolvedSourceKey });
 
   return uploadSkillPackage({
     ...targetParams,
-    zipBuffer
+    zipBuffer: packageBuffer
   });
 }

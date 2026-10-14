@@ -123,5 +123,11 @@
   "migrations.20261009_backfill_agent_sandbox_team_id.description": "Backfills teamId for legacy agent sandbox instances from their App/Skill source. Orphan records whose source was deleted are skipped and counted; records whose source exists without a teamId are reported as failed records for repair and retry.",
   "migrations.20261009_backfill_agent_sandbox_team_id.instances": "Backfill sandbox team ownership",
   "migrations.20261009_backfill_agent_sandbox_team_id.validation": "Validate sandbox team ownership backfill",
-  "migrations.20261009_backfill_agent_sandbox_team_id.result": "Scanned {{scannedCount}} sandbox instances, backfilled {{backfilledCount}} team bindings, skipped {{orphanCount}} orphan records."
+  "migrations.20261009_backfill_agent_sandbox_team_id.result": "Scanned {{scannedCount}} sandbox instances, backfilled {{backfilledCount}} team bindings, skipped {{orphanCount}} orphan records.",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.name": "Migrate sandbox archives and skill packages to tar.gz",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.description": "Streams legacy sandbox cold archives (package.zip) and skill version packages (*.zip) into .tar.gz format and removes legacy .zip objects to support zero-disk streaming extraction.",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.sandbox_archives": "Convert sandbox cold archives",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.skill_packages": "Convert skill version packages",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.validation": "Validate archive format migration",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.result": "Scanned {{sandboxScannedCount}} sandbox archives (converted {{sandboxConvertedCount}}) and {{skillScannedCount}} skill version packages (converted {{skillConvertedCount}})."
 }

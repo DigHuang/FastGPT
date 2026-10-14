@@ -225,7 +225,7 @@ active；删除任务只处理已经持久标记删除的 source。
 
 ### 5.3 归档与删除
 
-- v2 归档使用 `sandbox/archive/<sandboxId>/package.zip`。
+- v2 归档统一使用 `sandbox/archive/<sandboxId>/package.tar.gz`（历史存量 `package.zip` 通过 4.17.3 自动迁移任务与恢复前按需转换兜底统一收敛为 `package.tar.gz`，详见 [Sandbox 流式归档与恢复设计方案](./streaming-archive.md)）。
 - Legacy 归档继续使用 `agent-sandbox/<legacySandboxId>/package.zip`，不能直接改名为 v2 归档。
 - restore 发布 `running` 后保留 v2 S3 归档，后续重复恢复仍以该归档作为持久备份；只有业务资源
   删除流程才清理对应归档。

@@ -123,5 +123,11 @@
   "migrations.20261009_backfill_agent_sandbox_team_id.description": "為歷史 Agent 沙箱實例回填 teamId：從 App/Skill 來源解析團隊歸屬。來源已刪除的孤兒記錄只跳過並計數；來源存在但缺少 teamId 的記錄進入失敗明細，修復後可重試。",
   "migrations.20261009_backfill_agent_sandbox_team_id.instances": "回填沙箱團隊歸屬",
   "migrations.20261009_backfill_agent_sandbox_team_id.validation": "校驗沙箱團隊歸屬回填結果",
-  "migrations.20261009_backfill_agent_sandbox_team_id.result": "已掃描 {{scannedCount}} 個沙箱實例，回填團隊歸屬 {{backfilledCount}} 個，跳過孤兒記錄 {{orphanCount}} 個。"
+  "migrations.20261009_backfill_agent_sandbox_team_id.result": "已掃描 {{scannedCount}} 個沙箱實例，回填團隊歸屬 {{backfilledCount}} 個，跳過孤兒記錄 {{orphanCount}} 個。",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.name": "遷移沙箱冷歸檔與技能包為 tar.gz 格式",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.description": "將存量沙箱冷歸檔 package.zip 與技能版本包 *.zip 串流轉換為 .tar.gz 格式並清理舊 .zip 物件，支援沙箱零落盤串流解包。",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.sandbox_archives": "轉換沙箱冷歸檔包",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.skill_packages": "轉換技能版本包",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.validation": "校驗歸檔格式遷移結果",
+  "migrations.20261014_migrate_sandbox_archive_tar_gz.result": "已掃描 {{sandboxScannedCount}} 個沙箱歸檔（轉換 {{sandboxConvertedCount}} 個），掃描 {{skillScannedCount}} 個技能版本包（轉換 {{skillConvertedCount}} 個）。"
 }

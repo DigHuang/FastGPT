@@ -127,7 +127,7 @@ describe('sandbox runtime profile', () => {
         FASTGPT_SESSION_ID: 'session-1',
         FASTGPT_WORKDIR: '/custom/devbox/workspace',
         IDE_AGENT_ENABLED: 'true',
-        DEVBOX_SDK_MAX_FILE_SIZE: '379584512',
+        DEVBOX_SDK_MAX_FILE_SIZE: '916455424',
         FASTGPT_IDE_MAX_FILE_BYTES: '10485760',
         FASTGPT_IDE_WS_MAX_MESSAGE_BYTES: '67108864',
         FASTGPT_IDE_WS_MAX_FRAME_BYTES: '16777216'

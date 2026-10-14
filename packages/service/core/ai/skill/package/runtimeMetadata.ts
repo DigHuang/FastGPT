@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { RuntimeSkillMetadataType } from '@fastgpt/global/core/ai/skill/type';
+import { isGzipBuffer, scanTarGzEntries } from '../../../../common/file/archive/tarGz';
 import { parseSkillMarkdown } from '../utils';
 import { validateZipSafety } from './zipBuilder';
 
@@ -8,36 +9,28 @@ export type ExtractRuntimeSkillsFromPackageOptions = {
 };
 
 /**
- * 从 Skill 包中解析运行态子 Skill 元数据。
+ * 从已读取的 `SKILL.md` 文件列表中提取并校验运行态子 Skill 元数据。
  *
- * 标准 workspace 读取 `skills/<skillDir>/SKILL.md`；历史单 skill 包允许从根目录或
- * 一级目录 `SKILL.md` 兜底解析，并把 path 规范化为运行态可识别的
- * `skills/<name>/SKILL.md`。初始空白 workspace 可通过 `allowEmpty` 跳过空包校验。
+ * 供沙盒内直接读取 `SKILL.md` 文本以及从 `.tar.gz` / `.zip` 归档解析共用。
  */
-export async function extractRuntimeSkillsFromPackage(
-  zipBuffer: Buffer,
+export function extractRuntimeSkillsFromMarkdownEntries(
+  entries: Array<{ path: string; content: string }>,
   options: ExtractRuntimeSkillsFromPackageOptions = {}
-): Promise<RuntimeSkillMetadataType[]> {
-  const zip = await JSZip.loadAsync(zipBuffer);
-  const safety = validateZipSafety(zip);
-  if (!safety.valid) {
-    throw new Error(safety.error || 'Invalid skill package');
-  }
-
-  const allSkillMdEntries = Object.entries(zip.files)
-    .filter(([, file]) => !file.dir)
-    .map(([path, file]) => ({
-      path: normalizeRuntimeSkillPath(path),
-      file
+): RuntimeSkillMetadataType[] {
+  const normalizedEntries = entries
+    .map((entry) => ({
+      path: normalizeRuntimeSkillPath(entry.path),
+      content: entry.content
     }))
     .sort((a, b) => a.path.localeCompare(b.path));
-  const workspaceEntries = allSkillMdEntries.filter((entry) =>
+
+  const workspaceEntries = normalizedEntries.filter((entry) =>
     isWorkspaceRuntimeSkillMdPath(entry.path)
   );
   const skillMdEntries =
     workspaceEntries.length > 0
       ? workspaceEntries
-      : allSkillMdEntries.filter((entry) => isLegacySkillMdPath(entry.path));
+      : normalizedEntries.filter((entry) => isLegacySkillMdPath(entry.path));
 
   if (skillMdEntries.length === 0) {
     if (options.allowEmpty) return [];
@@ -48,8 +41,7 @@ export async function extractRuntimeSkillsFromPackage(
   const runtimeSkills: RuntimeSkillMetadataType[] = [];
 
   for (const entry of skillMdEntries) {
-    const content = await entry.file.async('string');
-    const { frontmatter, error } = parseSkillMarkdown(content);
+    const { frontmatter, error } = parseSkillMarkdown(entry.content);
     if (error) {
       throw new Error(`${entry.path}: ${error}`);
     }
@@ -73,6 +65,67 @@ export async function extractRuntimeSkillsFromPackage(
   }
 
   return runtimeSkills;
+}
+
+/**
+ * 从 Skill 包（支持 `.tar.gz` 与旧版 `.zip`）中解析运行态子 Skill 元数据。
+ *
+ * 标准 workspace 读取 `skills/<skillDir>/SKILL.md`；历史单 skill 包允许从根目录或
+ * 一级目录 `SKILL.md` 兜底解析，并把 path 规范化为运行态可识别的
+ * `skills/<name>/SKILL.md`。初始空白 workspace 可通过 `allowEmpty` 跳过空包校验。
+ */
+export async function extractRuntimeSkillsFromPackage(
+  packageBuffer: Buffer,
+  options: ExtractRuntimeSkillsFromPackageOptions = {}
+): Promise<RuntimeSkillMetadataType[]> {
+  if (isGzipBuffer(packageBuffer)) {
+    const markdownEntries: Array<{ path: string; content: string }> = [];
+    await scanTarGzEntries({
+      source: packageBuffer,
+      shouldReadContent: ({ path, type }) => {
+        if (type !== 'file') return false;
+        const normalized = normalizeRuntimeSkillPath(path);
+        return isWorkspaceRuntimeSkillMdPath(normalized) || isLegacySkillMdPath(normalized);
+      },
+      onEntry: (entry) => {
+        if (entry.type !== 'file') return;
+        const normalized = normalizeRuntimeSkillPath(entry.path);
+        if (isWorkspaceRuntimeSkillMdPath(normalized) || isLegacySkillMdPath(normalized)) {
+          markdownEntries.push({
+            path: normalized,
+            content: entry.content.toString('utf8')
+          });
+        }
+      }
+    });
+
+    return extractRuntimeSkillsFromMarkdownEntries(markdownEntries, options);
+  }
+
+  const zip = await JSZip.loadAsync(packageBuffer);
+  const safety = validateZipSafety(zip);
+  if (!safety.valid) {
+    throw new Error(safety.error || 'Invalid skill package');
+  }
+
+  const candidateFiles = Object.entries(zip.files)
+    .filter(([, file]) => !file.dir)
+    .map(([path, file]) => ({
+      path: normalizeRuntimeSkillPath(path),
+      file
+    }))
+    .filter(
+      (entry) => isWorkspaceRuntimeSkillMdPath(entry.path) || isLegacySkillMdPath(entry.path)
+    );
+
+  const markdownEntries = await Promise.all(
+    candidateFiles.map(async (entry) => ({
+      path: entry.path,
+      content: await entry.file.async('string')
+    }))
+  );
+
+  return extractRuntimeSkillsFromMarkdownEntries(markdownEntries, options);
 }
 
 function normalizeRuntimeSkillPath(path: string): string {

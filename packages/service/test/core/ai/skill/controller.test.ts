@@ -354,7 +354,10 @@ describe('AgentSkill Controller', () => {
 
   // ==================== Import Skill ====================
   describe('importSkill', () => {
-    const packageContent = Buffer.from('opaque package content');
+    const packageContent = Buffer.concat([
+      Buffer.from([0x50, 0x4b, 0x05, 0x06]),
+      Buffer.alloc(18, 0)
+    ]);
 
     it('should import skill from package', async () => {
       const skillData = {
