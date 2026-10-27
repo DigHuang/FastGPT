@@ -125,6 +125,8 @@ export const createAgentLoopCoreEventStream = ({
   };
 
   const streamPlanStatus: AgentLoopCoreEventStream['streamPlanStatus'] = (status) => {
+    if (!streamAnswer) return;
+
     workflowStreamResponse?.({
       id: AGENT_PLAN_STREAM_RESPONSE_ID,
       event: SseResponseEventEnum.planStatus,
@@ -137,6 +139,8 @@ export const createAgentLoopCoreEventStream = ({
   };
 
   const streamPlan: AgentLoopCoreEventStream['streamPlan'] = (plan) => {
+    if (!streamAnswer) return;
+
     workflowStreamResponse?.({
       id: AGENT_PLAN_STREAM_RESPONSE_ID,
       event: SseResponseEventEnum.plan,

@@ -1,6 +1,6 @@
 import { Box, Button, Flex, Grid, HStack, Switch, useDisclosure } from '@chakra-ui/react';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
-import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
+import { NodeInputKeyEnum, WorkflowIOValueTypeEnum } from '@fastgpt/global/core/workflow/constants';
 import { FlowNodeInputTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import type { FlowNodeInputItemType } from '@fastgpt/global/core/workflow/type/io';
 import { type FlowNodeItemType } from '@fastgpt/global/core/workflow/type/node';
@@ -23,6 +23,7 @@ import InputLabel from '../render/RenderInput/Label';
 import RenderOutput from '../render/RenderOutput';
 import CatchError from '../render/RenderOutput/CatchError';
 import RenderToolInput, { hasDynamicToolInput } from '../render/RenderToolInput';
+import { useReference } from '../render/RenderInput/templates/Reference';
 
 import { AppContext } from '@/pageComponents/app/detail/context';
 import { WorkflowActionsContext } from '../../../context/workflowActionsContext';
@@ -36,8 +37,12 @@ import { getEditorVariables } from '../../../utils';
 import { useWorkflowQuoteLimit } from '../../hooks/useWorkflowQuoteLimit';
 
 import OptimizerPopover from '@/components/common/PromptEditor/OptimizerPopover';
+import { useDatasetTagFilterPrune } from '@/components/core/dataset/DatasetTagFilterRows';
+import {
+  getDatasetSearchParamInputs,
+  getDatasetSearchParams
+} from '../render/RenderInput/templates/SelectDatasetParams.utils';
 import { useAgentSkillManager } from './useAgentSkillManager';
-import { restoreDatasetParams } from './utils';
 
 import DatasetCard from '@/components/core/app/DatasetCard';
 import SkillCard from '@/components/core/app/SkillCard';
@@ -45,11 +50,18 @@ import { RechargeModal } from '@/components/support/wallet/NotSufficientModal';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import type { SelectedAgentSkillItemType } from '@fastgpt/global/core/app/formEdit/type';
 import { getToolIdentityKey, isDebugToolSource } from '@fastgpt/global/core/app/tool/utils';
-import { DatasetSearchModeEnum } from '@fastgpt/global/core/dataset/constants';
+import type { DatasetTagFilterValue } from '@fastgpt/global/core/dataset/search/tagFilter/type';
 import { getSelectedInputRenderType } from '@fastgpt/global/common/workflow/reference';
 import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
 
 import DebugToolTag from '@fastgpt/web/components/core/plugin/tool/DebugToolTag';
+import MyTag from '@fastgpt/web/components/common/Tag/index';
+import {
+  PluginStatusEnum,
+  PluginStatusMap,
+  type PluginStatusType
+} from '@fastgpt/global/core/plugin/type';
+import { getToolErrorMessage } from '@/web/core/workflow/check/message';
 import { useConfirm } from '@fastgpt/web/hooks/useConfirm';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import WorkflowSandboxConfig, {
@@ -72,24 +84,41 @@ const getRenderType = (input: FlowNodeInputItemType) =>
   getSelectedInputRenderType(input) || FlowNodeInputTypeEnum.custom;
 
 const agentModelSettingProps = {
-  showMaxToken: false,
   showTemperature: false,
   showTopP: false,
   showStopSign: false,
-  showResponseFormat: false,
-  showMultimodalConfig: false
+  showResponseFormat: false
 };
 
+const chooseButtonTooltipProps = {
+  offset: [0, 8] as [number, number],
+  px: 3,
+  py: 2,
+  fontSize: 'xs',
+  borderRadius: 'md',
+  arrowSize: 8,
+  boxShadow: '0px 2px 4px 0px rgba(161, 167, 179, 0.25), 0px 0px 1px 0px rgba(121, 141, 159, 0.25)',
+  shouldWrapChildren: false
+} as const;
+
 const ManualInputLabel = React.memo(function ManualInputLabel({
-  input
+  input,
+  RightComponent
 }: {
   input: FlowNodeInputItemType;
+  RightComponent?: React.ReactNode;
 }) {
   const { t } = useTranslation();
 
   return (
     <Flex className="nodrag" cursor={'default'} alignItems={'center'}>
       <FormLabel color={'myGray.600'}>{t(input.label as any)}</FormLabel>
+      {RightComponent && (
+        <>
+          <Box flex={'1'} />
+          {RightComponent}
+        </>
+      )}
     </Flex>
   );
 });
@@ -148,25 +177,11 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
   );
 
   // 节点 inputs 是已保存参数的唯一来源；弹窗自行维护草稿，避免本地副本遗漏模型 ID。
-  const datasetParamsData = useMemo(
-    () =>
-      restoreDatasetParams({
-        state: {
-          searchMode: DatasetSearchModeEnum.embedding,
-          embeddingWeight: 0.5,
-          limit: 3000,
-          similarity: 0.5,
-          usingReRank: true,
-          rerankModelId: undefined,
-          rerankWeight: 0.6,
-          datasetSearchUsingExtensionQuery: true,
-          datasetSearchExtensionModelId: undefined,
-          datasetSearchExtensionBg: ''
-        },
-        inputs
-      }),
-    [inputs]
-  );
+  const datasetParamsData = useMemo(() => getDatasetSearchParams(inputs), [inputs]);
+  const { referenceList: tagFilterReferenceList } = useReference({
+    nodeId,
+    valueType: WorkflowIOValueTypeEnum.any
+  });
   const {
     isOpen: isOpenDatasetParams,
     onOpen: onOpenDatasetParams,
@@ -180,8 +195,8 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
 
   // ---- Prompt ----
   const promptInput = useMemo(
-    () => inputs.find((i) => i.key === NodeInputKeyEnum.aiSystemPrompt),
-    [inputs]
+    () => commonInputs.find((i) => i.key === NodeInputKeyEnum.aiSystemPrompt),
+    [commonInputs]
   );
   const skillsInput = useMemo(
     () => inputs.find((i) => i.key === NodeInputKeyEnum.skills),
@@ -201,36 +216,53 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
   );
 
   // Split commonInputs into groups
-  const manualKeys = useMemo(
+  const modelSettingInputKeys = useMemo(
     () =>
       new Set([
         NodeInputKeyEnum.aiModelId,
         NodeInputKeyEnum.aiModel,
+        NodeInputKeyEnum.aiChatTemperature,
+        NodeInputKeyEnum.aiChatMaxToken,
+        NodeInputKeyEnum.aiChatIsResponseText,
+        NodeInputKeyEnum.aiChatVision,
+        NodeInputKeyEnum.aiChatAudio,
+        NodeInputKeyEnum.aiChatVideo,
+        NodeInputKeyEnum.aiChatExtractFiles,
+        NodeInputKeyEnum.aiChatReasoning,
+        NodeInputKeyEnum.aiChatReasoningEffort,
+        NodeInputKeyEnum.aiChatTopP,
+        NodeInputKeyEnum.aiChatStopSign,
+        NodeInputKeyEnum.aiChatResponseFormat,
+        NodeInputKeyEnum.aiChatJsonSchema
+      ]),
+    []
+  );
+  const manualKeys = useMemo(
+    () =>
+      new Set([
+        ...modelSettingInputKeys,
         NodeInputKeyEnum.aiSystemPrompt,
         NodeInputKeyEnum.skills,
         NodeInputKeyEnum.useAgentSandbox,
         NodeInputKeyEnum.sandboxEntrypoint,
         NodeInputKeyEnum.selectedTools
       ]),
-    []
+    [modelSettingInputKeys]
   );
   const modelInputs = useMemo(
-    () =>
-      commonInputs.filter(
-        (i) => i.key === NodeInputKeyEnum.aiModelId || i.key === NodeInputKeyEnum.aiModel
-      ),
-    [commonInputs]
+    () => commonInputs.filter((i) => modelSettingInputKeys.has(i.key as NodeInputKeyEnum)),
+    [commonInputs, modelSettingInputKeys]
   );
-  // Inputs rendered before skills/tools (fileLink, userChatInput)
+  // Inputs rendered after dataset (history, userChatInput)
   const chatInputKeys = useMemo(
-    () => new Set([NodeInputKeyEnum.fileUrlList, NodeInputKeyEnum.userChatInput]),
+    () => new Set([NodeInputKeyEnum.history, NodeInputKeyEnum.userChatInput]),
     []
   );
   const chatInputs = useMemo(
     () => commonInputs.filter((i) => chatInputKeys.has(i.key as NodeInputKeyEnum)),
     [commonInputs, chatInputKeys]
   );
-  // Inputs rendered after skills/tools (dataset, etc.)
+  // Dataset inputs
   const datasetInputs = useMemo(
     () =>
       commonInputs.filter(
@@ -240,45 +272,62 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
       ),
     [commonInputs, manualKeys, chatInputKeys]
   );
-  // Separate datasetSelectList from other dataset inputs
   const datasetSelectInput = useMemo(
     () => datasetInputs.find((i) => i.key === NodeInputKeyEnum.datasetSelectList),
     [datasetInputs]
   );
-  const selectedDatasets = useMemo(
-    () => (Array.isArray(datasetSelectInput?.value) ? datasetSelectInput!.value : []),
+  const datasetSelectRenderType = useMemo(
+    () =>
+      datasetSelectInput ? getRenderType(datasetSelectInput) : FlowNodeInputTypeEnum.selectDataset,
     [datasetSelectInput]
   );
+  const selectedDatasets = useMemo(
+    () =>
+      datasetSelectRenderType === FlowNodeInputTypeEnum.selectDataset &&
+      Array.isArray(datasetSelectInput?.value)
+        ? datasetSelectInput.value
+        : [],
+    [datasetSelectInput, datasetSelectRenderType]
+  );
+  const datasetIds = useMemo(
+    () => selectedDatasets.map((item) => item.datasetId),
+    [selectedDatasets]
+  );
+  const handlePruneTagFilter = useCallback(
+    (nextFilter: DatasetTagFilterValue) => {
+      for (const input of getDatasetSearchParamInputs({
+        inputs,
+        values: {
+          ...datasetParamsData,
+          collectionFilterMatch: nextFilter
+        }
+      })) {
+        if (input.key !== NodeInputKeyEnum.collectionFilterMatch) continue;
+        if (inputs.some((item) => item.key === input.key)) {
+          onChangeNode({ nodeId, type: 'updateInput', key: input.key, value: input });
+        } else {
+          onChangeNode({ nodeId, type: 'addInput', value: input });
+        }
+      }
+    },
+    [datasetParamsData, inputs, nodeId, onChangeNode]
+  );
+  useDatasetTagFilterPrune({
+    datasetIds,
+    value: datasetParamsData.collectionFilterMatch,
+    onChange: handlePruneTagFilter
+  });
   const onClickDatasetSearch = useCallback(() => {
-    if (selectedDatasets.length > 0) {
+    if (
+      datasetSelectRenderType === FlowNodeInputTypeEnum.reference ||
+      selectedDatasets.length > 0
+    ) {
       onOpenDatasetParams();
       return;
     }
 
     onOpenDatasetSelect();
-  }, [onOpenDatasetParams, onOpenDatasetSelect, selectedDatasets.length]);
-  // Skill manager (for PromptEditor @ integration)
-  const {
-    selectedTools,
-    skillOption,
-    selectedSkills,
-    onClickSkill,
-    onRemoveSkill,
-    onUpdateOrAddTool,
-    onDeleteTool,
-    SkillModal
-  } = useAgentSkillManager({ nodeId, inputs, onClickDatasetSearch });
-  const datasetOtherInputs = useMemo(
-    () =>
-      datasetInputs.filter(
-        (i) =>
-          i.key !== NodeInputKeyEnum.datasetSelectList &&
-          i.key !== NodeInputKeyEnum.datasetParams &&
-          i.key !== NodeInputKeyEnum.datasetSimilarity &&
-          i.key !== NodeInputKeyEnum.authTmbId
-      ),
-    [datasetInputs]
-  );
+  }, [datasetSelectRenderType, onOpenDatasetParams, onOpenDatasetSelect, selectedDatasets.length]);
   const authTmbIdInput = useMemo(
     () => datasetInputs.find((i) => i.key === NodeInputKeyEnum.authTmbId),
     [datasetInputs]
@@ -320,8 +369,8 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
   const PromptSkillTip = useMemo(
     () =>
       promptRenderType === FlowNodeInputTypeEnum.textarea ? (
-        <HStack fontSize={'11px'} spacing={1} color={'myGray.500'}>
-          <MyIcon name={'common/info'} w={'0.8rem'} />
+        <HStack fontSize={'xs'} fontWeight={'medium'} spacing={1} color={'myGray.500'}>
+          <MyIcon name={'infoRounded'} w={'16px'} color={'myGray.500'} />
           <Box>{t('workflow:agent.prompt_skill_tip')}</Box>
         </HStack>
       ) : undefined,
@@ -342,6 +391,25 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
   const selectedAgentSkills: SelectedAgentSkillItemType[] = useMemo(
     () => (Array.isArray(skillsInput?.value) ? skillsInput!.value : []),
     [skillsInput]
+  );
+  const isAgentSkillSandboxUnavailable = useMemo(
+    () =>
+      selectedAgentSkills.length > 0 && (!sandboxInput?.value || !showSandbox || !enableSandbox),
+    [enableSandbox, sandboxInput?.value, selectedAgentSkills.length, showSandbox]
+  );
+  const statusLabelMap: Partial<Record<PluginStatusType, string>> = useMemo(
+    () => ({
+      [PluginStatusEnum.SoonOffline]: t('app:toolkit_status_soon_offline'),
+      [PluginStatusEnum.Offline]: t('common:error.tool_not_exist')
+    }),
+    [t]
+  );
+  const statusTooltipMap: Partial<Record<PluginStatusType, string>> = useMemo(
+    () => ({
+      [PluginStatusEnum.SoonOffline]: t('app:tool_soon_offset_tips'),
+      [PluginStatusEnum.Offline]: t('app:tool_offset_tips')
+    }),
+    [t]
   );
   const {
     isOpen: isOpenSkillSelect,
@@ -383,6 +451,75 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
     onOpenRecharge,
     openConfirm
   ]);
+  const onAddAgentSkill = useCallback(
+    (skill: SelectedAgentSkillItemType) => {
+      if (!skillsInput) return false;
+      if (!showSandbox) {
+        toast({
+          status: 'warning',
+          title: t('skill:sandbox_skill_system_not_configured_toast')
+        });
+        return false;
+      }
+      if (!enableSandbox) {
+        openConfirm({
+          title: t('skill:sandbox_plan_not_supported_title'),
+          customContent: t('skill:sandbox_skill_plan_not_supported_content'),
+          onConfirm: isTeamAdmin ? onOpenRecharge : undefined,
+          confirmText: isTeamAdmin ? t('skill:sandbox_upgrade_action') : t('common:Close'),
+          cancelText: t('common:Close'),
+          showCancel: isTeamAdmin
+        })();
+        return false;
+      }
+
+      onChangeNode([
+        {
+          nodeId,
+          key: NodeInputKeyEnum.skills,
+          type: 'updateInput',
+          value: {
+            ...skillsInput,
+            value: [skill, ...selectedAgentSkills.filter((item) => item.skillId !== skill.skillId)]
+          }
+        },
+        ...(sandboxInput
+          ? [
+              {
+                nodeId,
+                key: NodeInputKeyEnum.useAgentSandbox,
+                type: 'updateInput' as const,
+                value: {
+                  ...sandboxInput,
+                  value: true
+                }
+              }
+            ]
+          : [])
+      ]);
+      if (sandboxInput && !sandboxInput.value) {
+        toast({
+          status: 'success',
+          title: t('skill:sandbox_auto_enabled_for_skill')
+        });
+      }
+      return true;
+    },
+    [
+      enableSandbox,
+      isTeamAdmin,
+      nodeId,
+      onChangeNode,
+      onOpenRecharge,
+      openConfirm,
+      sandboxInput,
+      selectedAgentSkills,
+      showSandbox,
+      skillsInput,
+      t,
+      toast
+    ]
+  );
   const onChangeAgentSandbox = useCallback(
     (checked: boolean) => {
       if (!sandboxInput) return;
@@ -431,6 +568,24 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
       toast
     ]
   );
+  // Skill manager (for PromptEditor @ integration)
+  const {
+    selectedTools,
+    skillOption,
+    selectedSkills,
+    onClickSkill,
+    onRemoveSkill,
+    onUpdateOrAddTool,
+    onDeleteTool,
+    SkillModal
+  } = useAgentSkillManager({
+    nodeId,
+    inputs,
+    selectedAgentSkills,
+    onAddAgentSkill,
+    onEnableSandbox: () => onChangeAgentSandbox(true),
+    onClickDatasetSearch
+  });
   // ---- Tools ----
   const {
     isOpen: isOpenToolSelect,
@@ -468,12 +623,17 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
         {/* 2. System prompt */}
         {promptInput && (
           <Box position={'relative'} mb={5}>
-            <InputLabel nodeId={nodeId} input={promptInput} RightComponent={PromptSkillTip} />
+            <InputLabel
+              nodeId={nodeId}
+              input={promptInput}
+              RightComponent={PromptSkillTip}
+              isTool={isTool}
+            />
             <Box mt={2} className={'nodrag'}>
               {promptRenderType === FlowNodeInputTypeEnum.textarea ? (
                 <PromptEditor
-                  minH={160}
-                  bg={'myGray.50'}
+                  minH={140}
+                  bg={'white'}
                   title={t('common:core.ai.Prompt')}
                   isRichText={true}
                   showOpenModal={true}
@@ -486,13 +646,22 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
                   onClickSkill={onClickSkill}
                   onRemoveSkill={onRemoveSkill}
                   ExtensionPopover={[OptimizerPopoverComponent]}
-                  placeholder={[
-                    promptInput.placeholder ? t(promptInput.placeholder as any) : '',
-                    t('workflow:agent.prompt_placeholder')
-                  ]
-                    .filter(Boolean)
-                    .join('\n')}
+                  placeholder={t('workflow:agent.prompt_placeholder')}
                 />
+              ) : promptRenderType === FlowNodeInputTypeEnum.agentGenerated ? (
+                <Flex
+                  h={'40px'}
+                  alignItems={'center'}
+                  px={3}
+                  bg={'myGray.50'}
+                  border={'base'}
+                  borderColor={'myGray.200'}
+                  borderRadius={'md'}
+                  color={'myGray.500'}
+                  fontSize={'sm'}
+                >
+                  {t('common:core.workflow.inputType.agentGeneratedInputPlaceholder')}
+                </Flex>
               ) : (
                 <ReferenceRender inputs={inputs} item={promptInput} nodeId={nodeId} />
               )}
@@ -500,9 +669,7 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
           </Box>
         )}
 
-        {/* 3. Chat inputs (fileLink, userChatInput) */}
-        {chatInputs.length > 0 && <RenderInput nodeId={nodeId} flowInputList={chatInputs} />}
-
+        {/* 3. Sandbox */}
         <WorkflowSandboxConfig
           nodeId={nodeId}
           sandboxInput={sandboxInput}
@@ -529,31 +696,50 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
         {/* 4. Skills section (manual selection) */}
         {skillsInput && (
           <Box mb={5}>
-            <ManualInputLabel input={skillsInput} />
+            <ManualInputLabel
+              input={skillsInput}
+              RightComponent={
+                isAgentSkillSandboxUnavailable ? (
+                  <MyTag
+                    colorSchema={'red'}
+                    type={'borderFill'}
+                    cursor={'pointer'}
+                    onClick={openSkillSelect}
+                  >
+                    {t('skill:sandbox_unavailable_tag')}
+                  </MyTag>
+                ) : undefined
+              }
+            />
             <Box mt={2} className={'nodrag'}>
               <Grid
                 gridTemplateColumns={'repeat(2, minmax(0, 1fr))'}
-                gridGap={4}
+                gridGap={3}
                 minW={'350px'}
                 w={'100%'}
               >
-                <Button
-                  h={10}
-                  leftIcon={<MyIcon name={'common/selectLight'} w={'14px'} />}
-                  onClick={openSkillSelect}
-                >
-                  {t('common:Choose')}
-                </Button>
+                <MyTooltip label={t('workflow:agent.select_skill')} {...chooseButtonTooltipProps}>
+                  <Button
+                    variant={'primaryOutline'}
+                    h={10}
+                    w={'100%'}
+                    leftIcon={<MyIcon name={'common/selectLight'} w={'14px'} />}
+                    onClick={openSkillSelect}
+                  >
+                    {t('common:Choose')}
+                  </Button>
+                </MyTooltip>
                 {selectedAgentSkills.map((item) => (
                   <SkillCard
                     key={item.skillId}
                     skill={item}
                     avatarSize={'18px'}
-                    nameFontWeight={'bold'}
+                    nameFontWeight={'medium'}
                     flexProps={{
                       h: 10,
-                      px: 2,
-                      boxShadow: 'sm'
+                      px: 3,
+                      py: 2.5,
+                      boxShadow: 'none'
                     }}
                     onDelete={() => {
                       if (!skillsInput) return;
@@ -574,37 +760,7 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
                 <SkillSelectModal
                   selectedSkills={selectedAgentSkills}
                   onAddSkill={(skill: SelectedAgentSkillItemType) => {
-                    if (!skillsInput) return;
-                    onChangeNode([
-                      {
-                        nodeId,
-                        key: NodeInputKeyEnum.skills,
-                        type: 'updateInput',
-                        value: {
-                          ...skillsInput,
-                          value: [skill, ...selectedAgentSkills]
-                        }
-                      },
-                      ...(sandboxInput
-                        ? [
-                            {
-                              nodeId,
-                              key: NodeInputKeyEnum.useAgentSandbox,
-                              type: 'updateInput' as const,
-                              value: {
-                                ...sandboxInput,
-                                value: true
-                              }
-                            }
-                          ]
-                        : [])
-                    ]);
-                    if (sandboxInput && !sandboxInput.value) {
-                      toast({
-                        status: 'success',
-                        title: t('skill:sandbox_auto_enabled_for_skill')
-                      });
-                    }
+                    onAddAgentSkill(skill);
                   }}
                   onRemoveSkill={(skillId: string) => {
                     if (!skillsInput) return;
@@ -632,75 +788,119 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
             <Box mt={2} className={'nodrag'}>
               <Grid
                 gridTemplateColumns={'repeat(2, minmax(0, 1fr))'}
-                gridGap={4}
+                gridGap={3}
                 minW={'350px'}
                 w={'100%'}
               >
-                <Button
-                  h={10}
-                  leftIcon={<MyIcon name={'common/selectLight'} w={'14px'} />}
-                  onClick={onOpenToolSelect}
-                >
-                  {t('common:Choose')}
-                </Button>
-                {selectedTools.map((item) => (
-                  <MyTooltip
-                    key={getToolIdentityKey(item.pluginId || item.id, item.source)}
-                    label={item.intro}
+                <MyTooltip label={t('workflow:agent.select_tool')} {...chooseButtonTooltipProps}>
+                  <Button
+                    variant={'primaryOutline'}
+                    h={10}
+                    w={'100%'}
+                    leftIcon={<MyIcon name={'common/selectLight'} w={'14px'} />}
+                    onClick={onOpenToolSelect}
                   >
-                    <Flex
-                      alignItems={'center'}
-                      h={10}
-                      boxShadow={'sm'}
-                      bg={'white'}
-                      border={'base'}
-                      px={2}
-                      borderRadius={'md'}
-                      _hover={{
-                        borderColor: 'primary.300',
-                        '& .delete-btn': { display: 'flex' },
-                        '& .tool-status-tag': { display: 'none' },
-                        '& .setting-btn': { display: 'flex' }
-                      }}
+                    {t('common:Choose')}
+                  </Button>
+                </MyTooltip>
+                {selectedTools.map((item) => {
+                  const status = item.pluginData?.status || item.status;
+                  const toolError = getToolErrorMessage({
+                    status,
+                    error: item.pluginData?.error,
+                    t
+                  });
+                  const hasToolError = !!toolError;
+                  const isUnconfigured = item.configStatus === 'waitingForConfig';
+                  const isDebugTool = isDebugToolSource(item.source);
+
+                  return (
+                    <MyTooltip
+                      key={getToolIdentityKey(item.pluginId || item.id, item.source)}
+                      label={toolError || item.intro}
                     >
-                      <Avatar src={item.avatar} w={'18px'} borderRadius={'xs'} />
-                      <Box
-                        ml={1.5}
-                        flex={'1 0 0'}
-                        w={0}
-                        className="textEllipsis"
-                        fontWeight={'bold'}
-                        fontSize={['sm', 'sm']}
-                      >
-                        {item.name}
-                      </Box>
-                      {isDebugToolSource(item.source) && (
-                        <DebugToolTag className="tool-status-tag" />
-                      )}
-                      <MyIconButton
-                        className="setting-btn"
-                        display={'none'}
-                        icon="common/setting"
-                        tip={t('app:tool_param_config')}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClickSkill(item.pluginId!);
+                      <Flex
+                        alignItems={'center'}
+                        h={10}
+                        boxShadow={'none'}
+                        bg={'white'}
+                        border={'base'}
+                        borderColor={hasToolError ? 'red.600' : 'myGray.200'}
+                        px={3}
+                        py={2.5}
+                        borderRadius={'md'}
+                        _hover={{
+                          borderColor: hasToolError ? 'red.600' : 'primary.300',
+                          '& .delete-btn': { display: 'flex' },
+                          '& .tool-status-tag': { display: 'none' },
+                          '& .setting-btn': { display: 'flex' }
                         }}
-                      />
-                      <Box className="delete-btn" display={'none'}>
-                        <MyIconButton
-                          icon="delete"
-                          hoverBg="red.50"
-                          hoverColor="red.600"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteTool(item.pluginId!, item.source);
-                          }}
-                        />
-                      </Box>
-                    </Flex>
-                  </MyTooltip>
-                ))}
+                      >
+                        <Avatar src={item.avatar} w={'18px'} borderRadius={'xs'} />
+                        <Box
+                          ml={1.5}
+                          flex={'1 0 0'}
+                          w={0}
+                          className="textEllipsis"
+                          fontWeight={'medium'}
+                          fontSize={['sm', 'sm']}
+                          color={hasToolError ? 'red.600' : 'myGray.900'}
+                        >
+                          {item.name}
+                        </Box>
+                        {status === PluginStatusEnum.SoonOffline && (
+                          <MyTooltip label={statusTooltipMap[status]}>
+                            <MyTag
+                              display={'block'}
+                              className="tool-status-tag"
+                              colorSchema={PluginStatusMap[status].tagColor}
+                              type="borderFill"
+                            >
+                              {statusLabelMap[status]}
+                            </MyTag>
+                          </MyTooltip>
+                        )}
+                        {toolError && (
+                          <MyTag colorSchema="red" type="fill" className="tool-status-tag">
+                            <MyIcon name={'common/error'} w={'14px'} mr={1} />
+                            <Box color={'red.600'} maxW={'150px'} className="textEllipsis">
+                              {toolError}
+                            </Box>
+                          </MyTag>
+                        )}
+                        {isUnconfigured && (
+                          <MyTag colorSchema="blue" type="fill" className="tool-status-tag">
+                            {t('app:wait_for_config')}
+                          </MyTag>
+                        )}
+                        {isDebugTool && <DebugToolTag className="tool-status-tag" />}
+                        {!hasToolError && (
+                          <MyIconButton
+                            className="setting-btn"
+                            display={'none'}
+                            icon="common/setting"
+                            tip={t('app:tool_param_config')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onClickSkill(item.pluginId!);
+                            }}
+                          />
+                        )}
+                        <Box className="delete-btn" display={'none'}>
+                          <MyIconButton
+                            icon="delete"
+                            hoverBg="red.50"
+                            hoverColor="red.600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteTool(item.pluginId!, item.source);
+                            }}
+                          />
+                        </Box>
+                      </Flex>
+                    </MyTooltip>
+                  );
+                })}
               </Grid>
               {isOpenToolSelect && currentModel && (
                 <ToolSelectModal
@@ -716,83 +916,128 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
           </Box>
         )}
 
-        {/* 6. Dataset inputs (datasetSelectList, datasetParams, etc.) */}
+        {/* 6. Dataset section (supports manual selection and variable reference) */}
         {datasetSelectInput && (
-          <Box>
-            <Flex className="nodrag" cursor={'default'} alignItems={'center'}>
-              <FormLabel color={'myGray.600'}>{t('common:core.dataset.Dataset')}</FormLabel>
-              {feConfigs?.isPlus && authTmbIdInput && (
-                <Flex ml={2} alignItems={'center'}>
-                  <Box fontSize={'sm'} color={'myGray.600'} whiteSpace={'nowrap'}>
-                    {t('workflow:auth_tmb_id')}
-                  </Box>
-                  <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
-                  <Switch
-                    ml={1}
-                    size={'sm'}
-                    isChecked={!!authTmbIdInput.value}
-                    onChange={(e) => onChangeAuthTmbId(e.target.checked)}
-                  />
-                </Flex>
-              )}
-              <MyTooltip label={t('workflow:params_setting')}>
-                <Box
-                  ml={2}
-                  display={'inline-flex'}
-                  alignItems={'center'}
-                  cursor={'pointer'}
-                  color={'myGray.500'}
-                  _hover={{ color: 'primary.600' }}
-                  onClick={onOpenDatasetParams}
-                >
-                  <MyIcon name={'common/settingLight'} w={'16px'} />
-                </Box>
-              </MyTooltip>
-            </Flex>
+          <Box mb={5}>
+            <InputLabel
+              nodeId={nodeId}
+              input={datasetSelectInput}
+              isTool={isTool}
+              RightComponent={
+                <HStack spacing={2} className="nodrag">
+                  {feConfigs?.isPlus && authTmbIdInput && (
+                    <Flex alignItems={'center'}>
+                      <Box
+                        fontSize={'xs'}
+                        fontWeight={'medium'}
+                        color={'myGray.600'}
+                        whiteSpace={'nowrap'}
+                      >
+                        {t('workflow:auth_tmb_id')}
+                      </Box>
+                      <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
+                      <Switch
+                        ml={2}
+                        size={'sm'}
+                        isChecked={!!authTmbIdInput.value}
+                        onChange={(e) => onChangeAuthTmbId(e.target.checked)}
+                      />
+                    </Flex>
+                  )}
+                  <Button
+                    variant={'transparentBase'}
+                    leftIcon={<MyIcon name={'edit'} w={'12px'} />}
+                    iconSpacing={1}
+                    size={'xs'}
+                    mr={'-5px'}
+                    color={'myGray.600'}
+                    onClick={onOpenDatasetParams}
+                  >
+                    {t('common:Params')}
+                  </Button>
+                </HStack>
+              }
+            />
             <Box mt={2} className={'nodrag'}>
-              <Grid
-                gridTemplateColumns={'repeat(2, minmax(0, 1fr))'}
-                gridGap={4}
-                minW={'350px'}
-                w={'100%'}
-              >
-                <Button
-                  h={10}
-                  leftIcon={<MyIcon name={'common/selectLight'} w={'14px'} />}
-                  onClick={onOpenDatasetSelect}
-                >
-                  {t('common:Choose')}
-                </Button>
-                {selectedDatasets.map((dataset) => (
-                  <DatasetCard key={dataset.datasetId} dataset={dataset} />
-                ))}
-              </Grid>
-              {isOpenDatasetSelect && (
-                <DatasetSelectModal
-                  defaultSelectedDatasets={selectedDatasets.map((d) => ({
-                    datasetId: d.datasetId,
-                    name: d.name,
-                    avatar: d.avatar,
-                    vectorModel: d.vectorModel,
-                    error: d.error
-                  }))}
-                  onChange={(e) => {
-                    if (!datasetSelectInput) return;
-                    onChangeNode({
-                      nodeId,
-                      key: NodeInputKeyEnum.datasetSelectList,
-                      type: 'updateInput',
-                      value: { ...datasetSelectInput, value: e }
-                    });
-                  }}
-                  onClose={onCloseDatasetSelect}
-                />
+              {datasetSelectRenderType === FlowNodeInputTypeEnum.selectDataset ? (
+                <>
+                  <Grid
+                    gridTemplateColumns={'repeat(2, minmax(0, 1fr))'}
+                    gridGap={3}
+                    minW={'350px'}
+                    w={'100%'}
+                  >
+                    <MyTooltip
+                      label={t('common:core.chat.Select dataset')}
+                      {...chooseButtonTooltipProps}
+                    >
+                      <Button
+                        variant={'primaryOutline'}
+                        h={10}
+                        w={'100%'}
+                        leftIcon={<MyIcon name={'common/selectLight'} w={'14px'} />}
+                        onClick={onOpenDatasetSelect}
+                      >
+                        {t('common:Choose')}
+                      </Button>
+                    </MyTooltip>
+                    {selectedDatasets.map((dataset) => (
+                      <DatasetCard
+                        key={dataset.datasetId}
+                        dataset={dataset}
+                        flexProps={{
+                          h: 10,
+                          px: 3,
+                          py: 2.5,
+                          boxShadow: 'none'
+                        }}
+                        onDelete={(datasetId) => {
+                          if (!datasetSelectInput) return;
+                          onChangeNode({
+                            nodeId,
+                            key: NodeInputKeyEnum.datasetSelectList,
+                            type: 'updateInput',
+                            value: {
+                              ...datasetSelectInput,
+                              value: selectedDatasets.filter((item) => item.datasetId !== datasetId)
+                            }
+                          });
+                        }}
+                      />
+                    ))}
+                  </Grid>
+                  {isOpenDatasetSelect && (
+                    <DatasetSelectModal
+                      defaultSelectedDatasets={selectedDatasets.map((d) => ({
+                        datasetId: d.datasetId,
+                        name: d.name,
+                        avatar: d.avatar,
+                        vectorModel: d.vectorModel,
+                        error: d.error
+                      }))}
+                      onChange={(e) => {
+                        if (!datasetSelectInput) return;
+                        onChangeNode({
+                          nodeId,
+                          key: NodeInputKeyEnum.datasetSelectList,
+                          type: 'updateInput',
+                          value: { ...datasetSelectInput, value: e }
+                        });
+                      }}
+                      onClose={onCloseDatasetSelect}
+                    />
+                  )}
+                </>
+              ) : (
+                <ReferenceRender inputs={inputs} item={datasetSelectInput} nodeId={nodeId} />
               )}
             </Box>
           </Box>
         )}
-        {datasetOtherInputs.length > 0 && (
-          <RenderInput nodeId={nodeId} flowInputList={datasetOtherInputs} isTool={isTool} />
+
+        {/* 7. Chat inputs (history, userChatInput) */}
+        {chatInputs.length > 0 && (
+          <RenderInput nodeId={nodeId} flowInputList={chatInputs} isTool={isTool} />
         )}
       </Container>
 
@@ -820,17 +1065,17 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
         <DatasetParamsModal
           {...datasetParamsData}
           maxTokens={llmMaxQuoteContext}
+          showTagFilter={!!feConfigs?.isPlus}
+          datasetIds={datasetIds}
+          tagFilterReferenceList={tagFilterReferenceList}
           onClose={onCloseDatasetParams}
           onSuccess={(e) => {
-            for (const key in e) {
-              const item = inputs.find((input) => input.key === key);
-              if (!item) continue;
-              onChangeNode({
-                nodeId,
-                type: 'updateInput',
-                key,
-                value: { ...item, value: (e as any)[key] }
-              });
+            for (const input of getDatasetSearchParamInputs({ inputs, values: e })) {
+              if (inputs.some((item) => item.key === input.key)) {
+                onChangeNode({ nodeId, type: 'updateInput', key: input.key, value: input });
+              } else {
+                onChangeNode({ nodeId, type: 'addInput', value: input });
+              }
             }
           }}
         />

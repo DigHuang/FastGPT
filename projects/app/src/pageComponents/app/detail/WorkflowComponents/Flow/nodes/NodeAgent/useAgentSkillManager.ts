@@ -2,22 +2,33 @@ import { useCallback, useMemo } from 'react';
 import { useContextSelector } from 'use-context-selector';
 import { WorkflowActionsContext } from '../../../context/workflowActionsContext';
 import { useSkillManager } from '@/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager';
+import { AGENT_SANDBOX_TOOLSET_ID } from '@fastgpt/global/core/ai/sandbox/tools';
 import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
+import { nodeInputIsReference } from '@fastgpt/global/common/workflow/reference';
 import type { FlowNodeInputItemType } from '@fastgpt/global/core/workflow/type/io';
-import type { SelectedToolItemType } from '@fastgpt/global/core/app/formEdit/type';
+import type {
+  SelectedAgentSkillItemType,
+  SelectedToolItemType
+} from '@fastgpt/global/core/app/formEdit/type';
 import { getToolIdentityKey } from '@fastgpt/global/core/app/tool/utils';
 
 /**
  * Adapts the ChatAgent's useSkillManager to work in the workflow node context.
- * Reads/writes selectedTools from/to the node's input via onChangeNode.
+ * Reads/writes selectedTools and skills from/to the node's input via onChangeNode.
  */
 export const useAgentSkillManager = ({
   nodeId,
   inputs,
+  selectedAgentSkills = [],
+  onAddAgentSkill,
+  onEnableSandbox,
   onClickDatasetSearch
 }: {
   nodeId: string;
   inputs: FlowNodeInputItemType[];
+  selectedAgentSkills?: SelectedAgentSkillItemType[];
+  onAddAgentSkill?: (skill: SelectedAgentSkillItemType) => boolean;
+  onEnableSandbox?: () => void;
   onClickDatasetSearch?: () => void;
 }) => {
   const onChangeNode = useContextSelector(WorkflowActionsContext, (v) => v.onChangeNode);
@@ -32,13 +43,23 @@ export const useAgentSkillManager = ({
   );
 
   const fileLinkInput = useMemo(() => inputs.find((i) => i.key === 'fileLink'), [inputs]);
-  const canUploadFile = !!fileLinkInput?.value;
+  const canUploadFile = fileLinkInput ? !!fileLinkInput.value : true;
 
   const datasetInput = useMemo(
     () => inputs.find((i) => i.key === NodeInputKeyEnum.datasetSelectList),
     [inputs]
   );
-  const hasSelectedDataset = Array.isArray(datasetInput?.value) && datasetInput!.value.length > 0;
+  const hasSelectedDataset = useMemo(() => {
+    if (!datasetInput || !Array.isArray(datasetInput.value)) return false;
+    if (nodeInputIsReference(datasetInput)) {
+      return (
+        datasetInput.value.length === 2 &&
+        Boolean(datasetInput.value[0]) &&
+        Boolean(datasetInput.value[1])
+      );
+    }
+    return datasetInput.value.length > 0;
+  }, [datasetInput]);
 
   const useAgentSandbox = useMemo(() => {
     const sandboxInput = inputs.find((i) => i.key === NodeInputKeyEnum.useAgentSandbox);
@@ -95,17 +116,41 @@ export const useAgentSkillManager = ({
 
   const { skillOption, selectedSkills, onClickSkill, onRemoveSkill, SkillModal } = useSkillManager({
     selectedTools,
+    selectedAgentSkills,
     onUpdateOrAddTool,
     onDeleteTool,
+    onAddAgentSkill,
     canUploadFile,
     hasSelectedDataset,
     useAgentSandbox,
     onClickDatasetSearch
   });
 
+  const promptSkillOption = useMemo(
+    () => ({
+      ...skillOption,
+      onSelect: async (id: string) => {
+        const option = await skillOption.onSelect?.(id);
+        if (!option?.onClick) return option;
+
+        return {
+          ...option,
+          onClick: async (toolId: string) => {
+            const result = await option.onClick?.(toolId);
+            if (result?.id === AGENT_SANDBOX_TOOLSET_ID && !useAgentSandbox) {
+              onEnableSandbox?.();
+            }
+            return result;
+          }
+        };
+      }
+    }),
+    [onEnableSandbox, skillOption, useAgentSandbox]
+  );
+
   return {
     selectedTools,
-    skillOption,
+    skillOption: promptSkillOption,
     selectedSkills,
     onClickSkill,
     onRemoveSkill,

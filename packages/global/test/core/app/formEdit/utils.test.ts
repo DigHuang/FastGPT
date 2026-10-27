@@ -22,8 +22,14 @@ import {
 } from '@fastgpt/global/core/app/formEdit/utils';
 import {
   FlowNodeInputTypeEnum,
-  FlowNodeTypeEnum
+  FlowNodeTypeEnum,
+  INTERACTIVE_NODE_TYPES
 } from '@fastgpt/global/core/workflow/node/constant';
+import { AgentNode } from '@fastgpt/global/core/workflow/template/system/agent';
+import {
+  appSystemModuleTemplates,
+  pluginSystemModuleTemplates
+} from '@fastgpt/global/core/workflow/template/constants';
 import {
   NodeInputKeyEnum,
   VARIABLE_NODE_ID,
@@ -1806,5 +1812,76 @@ describe('migrateToolInputConfig', () => {
     });
 
     expect(result.value).toEqual(['shared']);
+  });
+});
+
+describe('AgentNode workflow template & tool mode normalization', () => {
+  it('registers AgentNode in appSystemModuleTemplates, excludes it from pluginSystemModuleTemplates, and marks it as interactive and tool-callable', () => {
+    expect(AgentNode.isTool).toBe(true);
+    expect(INTERACTIVE_NODE_TYPES).toContain(FlowNodeTypeEnum.agent);
+    expect(
+      appSystemModuleTemplates.some((item) => item.flowNodeType === FlowNodeTypeEnum.agent)
+    ).toBe(true);
+    expect(
+      pluginSystemModuleTemplates.some((item) => item.flowNodeType === FlowNodeTypeEnum.agent)
+    ).toBe(false);
+    expect(AgentNode.inputs.some((input) => input.key === NodeInputKeyEnum.fileUrlList)).toBe(
+      false
+    );
+  });
+
+  it('allows only aiSystemPrompt, history, and userChatInput to be agentGenerated in tool mode', () => {
+    const normalizedInputs = AgentNode.inputs.map((input) =>
+      normalizeFlowNodeInputType(input, { isTool: true })
+    );
+    const agentGeneratableKeys = normalizedInputs
+      .filter((input) => canInputBeAgentGenerated(input))
+      .map((input) => input.key);
+
+    expect(agentGeneratableKeys).toEqual([
+      NodeInputKeyEnum.aiSystemPrompt,
+      NodeInputKeyEnum.history,
+      NodeInputKeyEnum.userChatInput
+    ]);
+
+    const userChatInput = normalizedInputs.find(
+      (input) => input.key === NodeInputKeyEnum.userChatInput
+    );
+    expect(userChatInput?.selectedType).toBe(FlowNodeInputTypeEnum.agentGenerated);
+  });
+
+  it('aligns AgentNode input ordering and renderTypeList with Figma (skills/tools manual only, dataset manual + reference)', () => {
+    const visibleInputKeys = AgentNode.inputs
+      .filter((input) => !input.renderTypeList.includes(FlowNodeInputTypeEnum.hidden))
+      .map((input) => input.key);
+
+    expect(visibleInputKeys).toEqual([
+      NodeInputKeyEnum.aiModelId,
+      NodeInputKeyEnum.aiSystemPrompt,
+      NodeInputKeyEnum.useAgentSandbox,
+      NodeInputKeyEnum.sandboxEntrypoint,
+      NodeInputKeyEnum.skills,
+      NodeInputKeyEnum.selectedTools,
+      NodeInputKeyEnum.datasetSelectList,
+      NodeInputKeyEnum.datasetSimilarity,
+      NodeInputKeyEnum.collectionFilterMatch,
+      NodeInputKeyEnum.history,
+      NodeInputKeyEnum.userChatInput
+    ]);
+
+    const skillsInput = AgentNode.inputs.find((input) => input.key === NodeInputKeyEnum.skills);
+    const toolsInput = AgentNode.inputs.find(
+      (input) => input.key === NodeInputKeyEnum.selectedTools
+    );
+    const datasetInput = AgentNode.inputs.find(
+      (input) => input.key === NodeInputKeyEnum.datasetSelectList
+    );
+
+    expect(skillsInput?.renderTypeList).toEqual([FlowNodeInputTypeEnum.selectSkill]);
+    expect(toolsInput?.renderTypeList).toEqual([FlowNodeInputTypeEnum.selectTool]);
+    expect(datasetInput?.renderTypeList).toEqual([
+      FlowNodeInputTypeEnum.selectDataset,
+      FlowNodeInputTypeEnum.reference
+    ]);
   });
 });

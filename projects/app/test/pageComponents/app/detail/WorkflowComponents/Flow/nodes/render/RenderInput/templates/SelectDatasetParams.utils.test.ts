@@ -26,6 +26,7 @@ describe('getDatasetSearchParams', () => {
   );
   it('shows only persisted model choices and can read initially empty keys', () => {
     expect(getDatasetSearchParams([]).datasetSearchExtensionModelId).toBeUndefined();
+    expect(getDatasetSearchParams([]).collectionFilterMatch).toBeUndefined();
     const input = { key: 'datasetSearchExtensionModelId', value: 'chosen' };
     expect(getDatasetSearchParams([input]).datasetSearchExtensionModelId).toBe('chosen');
     expect(
@@ -35,6 +36,10 @@ describe('getDatasetSearchParams', () => {
       getDatasetSearchParams([{ key: 'datasetSearchUsingExtensionQuery', value: false }])
         .datasetSearchUsingExtensionQuery
     ).toBe(false);
+    expect(
+      getDatasetSearchParams([{ key: 'collectionFilterMatch', value: '{"and":["tag1"]}' }])
+        .collectionFilterMatch
+    ).toBe('{"and":["tag1"]}');
   });
 });
 describe('getDatasetSearchParamInputs', () => {
@@ -42,7 +47,8 @@ describe('getDatasetSearchParamInputs', () => {
     const values = {
       searchMode: DatasetSearchModeEnum.embedding,
       datasetSearchUsingExtensionQuery: true,
-      datasetSearchExtensionModelId: 'chosen'
+      datasetSearchExtensionModelId: 'chosen',
+      collectionFilterMatch: '{"and":["tag1"]}'
     };
     const inputs = getDatasetSearchParamInputs({ inputs: [], values });
     expect(inputs).toEqual(
@@ -51,6 +57,10 @@ describe('getDatasetSearchParamInputs', () => {
           key: 'datasetSearchExtensionModelId',
           value: 'chosen',
           renderTypeList: ['hidden']
+        }),
+        expect.objectContaining({
+          key: 'collectionFilterMatch',
+          value: '{"and":["tag1"]}'
         })
       ])
     );

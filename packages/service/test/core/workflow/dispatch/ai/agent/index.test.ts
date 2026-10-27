@@ -444,7 +444,12 @@ describe('dispatchRunAgent user context', () => {
   it('removes history files when the node file input is not bound', async () => {
     const { dispatchRunAgent } = await import('@fastgpt/service/core/workflow/dispatch/ai/agent');
     const props = createProps();
-    props.node.inputs = [];
+    props.node.inputs = [
+      {
+        key: NodeInputKeyEnum.fileUrlList,
+        value: []
+      }
+    ];
 
     let result: any;
     runWithContext(
@@ -464,6 +469,28 @@ describe('dispatchRunAgent user context', () => {
     expect(historyText).toBe('上一轮问题');
     expect(historyText).not.toContain('https://files.example.com/old.pdf');
     expect(currentText).toContain('https://files.example.com/current.pdf');
+  });
+
+  it('preserves history files by default when the workflow Agent node has no fileUrlList input', async () => {
+    const { dispatchRunAgent } = await import('@fastgpt/service/core/workflow/dispatch/ai/agent');
+    const props = createProps();
+    props.node.inputs = [];
+
+    let result: any;
+    runWithContext(
+      {
+        mcpClientMemory: {}
+      },
+      () => {
+        result = dispatchRunAgent(props);
+      }
+    );
+    await result;
+
+    const loopInput = runAgentLoopMock.mock.calls[0][0].input;
+    const historyText = getMessageTextForTest(loopInput.messages[0].content);
+
+    expect(historyText).toContain('<url>https://files.example.com/old.pdf</url>');
   });
 
   it('resolves PromptEditor tool references before building the agent system prompt', async () => {
@@ -777,6 +804,7 @@ describe('dispatchRunAgent user context', () => {
     const result = await resultPromise!;
 
     expect(result.data.answerText).toBe('ok');
+    expect(result[DispatchNodeResponseKeyEnum.toolResponse]).toBe('ok');
     expect(
       result[DispatchNodeResponseKeyEnum.assistantResponses].filter(
         (value: any) => value.text || value.reasoning
@@ -853,6 +881,7 @@ describe('dispatchRunAgent user context', () => {
     const result = await resultPromise!;
 
     expect(result.data.answerText).toBe('ok');
+    expect(result[DispatchNodeResponseKeyEnum.toolResponse]).toBe('ok');
     expect(result[DispatchNodeResponseKeyEnum.assistantResponses]).toMatchObject([
       {
         text: {
@@ -860,6 +889,158 @@ describe('dispatchRunAgent user context', () => {
         }
       }
     ]);
+  });
+
+  it('suppresses stream output and visible assistantResponses when isResponseAnswerText is false while preserving ask and answerText', async () => {
+    const { dispatchRunAgent } = await import('@fastgpt/service/core/workflow/dispatch/ai/agent');
+    const props = createProps();
+    props.params.isResponseAnswerText = false;
+    runAgentLoopMock.mockImplementationOnce(async ({ runtime }) => {
+      runtime.emitEvent({
+        type: 'reasoning_delta',
+        text: 'hidden reasoning'
+      });
+      runtime.emitEvent({
+        type: 'answer_delta',
+        text: 'hidden answer'
+      });
+      runtime.emitEvent({
+        type: 'plan_status',
+        status: 'generating'
+      });
+      runtime.emitEvent({
+        type: 'plan_snapshot',
+        plan: {
+          planId: 'plan_hidden',
+          name: 'Hidden Plan',
+          steps: []
+        }
+      });
+      return {
+        status: 'paused',
+        pause: {
+          toolCallId: 'call_ask_hidden',
+          interactive: {
+            type: 'agentAsk',
+            params: {
+              toolCallId: 'call_ask_hidden',
+              arguments: JSON.stringify({
+                reason: 'Need user confirmation',
+                blockerType: 'missing_required_input',
+                questions: [
+                  {
+                    question: 'Continue?',
+                    options: [
+                      { summary: 'Yes', value: 'Yes' },
+                      { summary: 'No', value: 'No' }
+                    ]
+                  }
+                ]
+              })
+            }
+          }
+        },
+        completeMessages: [],
+        assistantMessages: [
+          {
+            role: 'assistant',
+            content: 'hidden answer'
+          }
+        ],
+        requestIds: []
+      };
+    });
+
+    let resultPromise: Promise<any>;
+    runWithContext(
+      {
+        mcpClientMemory: {}
+      },
+      () => {
+        resultPromise = dispatchRunAgent(props);
+      }
+    );
+    const result = await resultPromise!;
+
+    expect(result[DispatchNodeResponseKeyEnum.interactive]).toEqual(
+      expect.objectContaining({
+        type: 'agentAsk',
+        params: expect.objectContaining({ toolCallId: 'call_ask_hidden' })
+      })
+    );
+    expect(
+      result[DispatchNodeResponseKeyEnum.assistantResponses].some(
+        (item: any) => item.text || item.reasoning || item.plan || item.planStatus || item.tools
+      )
+    ).toBe(false);
+    expect(
+      props.workflowStreamResponse.mock.calls.some(([event]: [{ event: string }]) =>
+        ['answer', 'toolCall', 'toolParams', 'toolResponse', 'planStatus', 'plan'].includes(
+          event.event
+        )
+      )
+    ).toBe(false);
+
+    runAgentLoopMock.mockResolvedValueOnce({
+      status: 'done',
+      completeMessages: [],
+      assistantMessages: [
+        {
+          role: 'assistant',
+          content: 'hidden answer'
+        }
+      ],
+      requestIds: []
+    });
+    let donePromise: Promise<any>;
+    runWithContext(
+      {
+        mcpClientMemory: {}
+      },
+      () => {
+        donePromise = dispatchRunAgent(props);
+      }
+    );
+    const doneResult = await donePromise!;
+    expect(doneResult.data.answerText).toBe('hidden answer');
+    expect(doneResult[DispatchNodeResponseKeyEnum.toolResponse]).toBe('hidden answer');
+    expect(doneResult[DispatchNodeResponseKeyEnum.assistantResponses]).toEqual([]);
+  });
+
+  it('does not append errorText to assistantResponses when catchError is enabled on the node', async () => {
+    const { dispatchRunAgent } = await import('@fastgpt/service/core/workflow/dispatch/ai/agent');
+    const props = createProps();
+    props.node.catchError = true;
+    runAgentLoopMock.mockResolvedValueOnce({
+      status: 'error',
+      error: {
+        message: 'LLM request failed'
+      },
+      completeMessages: [],
+      assistantMessages: [],
+      requestIds: []
+    });
+
+    let resultPromise: Promise<any>;
+    runWithContext(
+      {
+        mcpClientMemory: {}
+      },
+      () => {
+        resultPromise = dispatchRunAgent(props);
+      }
+    );
+    const result = await resultPromise!;
+
+    expect(result.error?.system_error_text).toBe('LLM request failed');
+    expect(result[DispatchNodeResponseKeyEnum.toolResponse]).toEqual({
+      error: 'LLM request failed'
+    });
+    expect(
+      result[DispatchNodeResponseKeyEnum.assistantResponses].filter(
+        (item: any) => !item.inputContext
+      )
+    ).toEqual([]);
   });
 
   it('publishes Agent internal responses as current-layer top-level rows', async () => {

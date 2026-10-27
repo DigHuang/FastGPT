@@ -1,6 +1,9 @@
 import { getWorkflowModelCheckData } from '@/web/core/workflow/modelData';
 import { getNodeAllSource } from '@/web/core/workflow/utils';
 import { checkWorkflowBeforeRunOrPublish } from '@/web/core/workflow/check/check';
+import { findWorkflowSandboxIssueNode } from '@/web/core/workflow/check/resource';
+import { useSystemStore } from '@/web/common/system/useSystemStore';
+import { useUserStore } from '@/web/support/user/useUserStore';
 import type { RuntimeNodeItemType } from '@fastgpt/global/core/workflow/runtime/type';
 import { storeNodes2RuntimeNodes } from '@fastgpt/global/core/workflow/runtime/utils';
 import type {
@@ -57,6 +60,10 @@ export const useDebug = () => {
   const { t } = useSafeTranslation();
   const { t: workflowT } = useTranslation();
   const { toast } = useToast();
+  const { feConfigs } = useSystemStore();
+  const { teamPlanStatus } = useUserStore();
+  const showSandbox = feConfigs?.show_agent_sandbox;
+  const enableSandbox = !teamPlanStatus?.standard || !!teamPlanStatus?.standard?.enableSandbox;
 
   const setNodes = useContextSelector(WorkflowBufferDataContext, (v) => v.setNodes);
   const getNodes = useContextSelector(WorkflowBufferDataContext, (v) => v.getNodes);
@@ -109,6 +116,25 @@ export const useDebug = () => {
 
   const flowData2StoreDataAndCheck = useCallback(async () => {
     const nodes = getNodes();
+
+    const sandboxIssue = findWorkflowSandboxIssueNode({
+      nodes,
+      showSandbox,
+      enableSandbox,
+      t: workflowT
+    });
+    if (sandboxIssue) {
+      onUpdateNodeError(sandboxIssue.node.data.nodeId, true);
+      fitView({
+        nodes: [sandboxIssue.node],
+        padding: 0.3
+      });
+      toast({
+        status: 'warning',
+        title: sandboxIssue.message
+      });
+      return;
+    }
 
     const { issueMap, hasError, firstErrorNodeId, errorMessages } = checkWorkflowBeforeRunOrPublish(
       {
@@ -164,7 +190,9 @@ export const useDebug = () => {
     onUpdateNodeError,
     t,
     toast,
-    workflowT
+    workflowT,
+    showSandbox,
+    enableSandbox
   ]);
 
   const openDebugNode = useCallback(

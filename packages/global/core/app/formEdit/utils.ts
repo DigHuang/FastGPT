@@ -128,6 +128,7 @@ export const canInputBeAgentGenerated = (
   if (input.canAgentGenerated === false) return false;
   if (input.key === NodeInputKeyEnum.systemInputConfig) return false;
   if (input.key === NodeInputKeyEnum.forbidStream) return false;
+  if (input.key === NodeInputKeyEnum.useAgentSandbox) return false;
   if (!Array.isArray(input.renderTypeList)) return false;
   return !input.renderTypeList.some((type) => agentGeneratedDenyRenderTypes.has(type));
 };

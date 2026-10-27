@@ -10,6 +10,7 @@ import {
   checkWorkflowBeforeRunOrPublish,
   checkWorkflowNodeIssues
 } from '@/web/core/workflow/check/check';
+import { findWorkflowSandboxIssueNode } from '@/web/core/workflow/check/resource';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import {
   canInputBeAgentGenerated,
@@ -197,31 +198,23 @@ export const WorkflowUtilsProvider = ({ children }: { children: ReactNode }) => 
       const nodes = getNodes();
 
       // Sandbox unavailable check
-      const sandboxUnavailableNode = nodes.find((node) => {
-        if (
-          node.data.flowNodeType === FlowNodeTypeEnum.agent ||
-          node.data.flowNodeType === FlowNodeTypeEnum.toolCall
-        ) {
-          const useAgentSandbox = node.data.inputs.find(
-            (input) => input.key === NodeInputKeyEnum.useAgentSandbox
-          )?.value;
-          return !!useAgentSandbox && (!showSandbox || !enableSandbox);
-        }
-        return false;
+      const sandboxIssue = findWorkflowSandboxIssueNode({
+        nodes,
+        showSandbox,
+        enableSandbox,
+        t
       });
 
-      if (sandboxUnavailableNode) {
+      if (sandboxIssue) {
         if (!hideTip) {
-          onUpdateNodeError(sandboxUnavailableNode.data.nodeId, true);
+          onUpdateNodeError(sandboxIssue.node.data.nodeId, true);
           fitView({
-            nodes: [sandboxUnavailableNode],
+            nodes: [sandboxIssue.node],
             padding: 0.3
           });
           toast({
             status: 'warning',
-            title: !showSandbox
-              ? t('skill:sandbox_system_not_configured_toast')
-              : t('app:sandbox_free_not_support')
+            title: sandboxIssue.message
           });
         }
         return;

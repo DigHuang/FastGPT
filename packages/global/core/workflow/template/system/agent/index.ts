@@ -13,7 +13,7 @@ import {
 } from '../../../constants';
 import {
   Input_Template_Dataset_Tag_Filter_Version,
-  Input_Template_File_Link,
+  Input_Template_History,
   Input_Template_SettingAiModel,
   Input_Template_System_Prompt,
   Input_Template_UserChatInput
@@ -29,12 +29,13 @@ export const AgentNode: FlowNodeTemplateType = {
   templateType: FlowNodeTemplateTypeEnum.ai,
   showSourceHandle: true,
   showTargetHandle: true,
-  avatar: 'core/app/type/agentFill',
+  avatar: 'core/workflow/template/agent',
   avatarLinear: 'core/workflow/template/agentLinear',
   colorSchema: 'emerald',
   name: i18nT('workflow:template.agent_module'),
   intro: i18nT('workflow:template.agent_module_intro'),
   showStatus: true,
+  isTool: true,
   catchError: false,
   version: '4.17.0',
   inputs: [
@@ -130,14 +131,13 @@ export const AgentNode: FlowNodeTemplateType = {
       description: systemPromptTip,
       placeholder: chatNodeSystemPromptTip
     },
-    Input_Template_File_Link,
-    Input_Template_UserChatInput,
     {
       key: NodeInputKeyEnum.useAgentSandbox,
       renderTypeList: [FlowNodeInputTypeEnum.switch],
       label: i18nT('app:use_agent_sandbox'),
       description: i18nT('app:use_computer_desc'),
       valueType: WorkflowIOValueTypeEnum.boolean,
+      canAgentGenerated: false,
       value: false
     },
     {
@@ -167,8 +167,8 @@ export const AgentNode: FlowNodeTemplateType = {
     // Dataset
     {
       key: NodeInputKeyEnum.datasetSelectList,
-      renderTypeList: [FlowNodeInputTypeEnum.selectDataset],
-      label: i18nT('common:core.module.input.label.Select dataset'),
+      renderTypeList: [FlowNodeInputTypeEnum.selectDataset, FlowNodeInputTypeEnum.reference],
+      label: i18nT('common:core.dataset.Dataset'),
       value: [],
       valueType: WorkflowIOValueTypeEnum.selectDataset,
       valueDesc: datasetSelectValueDesc
@@ -226,7 +226,7 @@ export const AgentNode: FlowNodeTemplateType = {
       renderTypeList: [FlowNodeInputTypeEnum.hidden],
       label: '',
       valueType: WorkflowIOValueTypeEnum.boolean,
-      value: true
+      value: false
     },
     {
       key: NodeInputKeyEnum.datasetSearchExtensionModelId,
@@ -251,12 +251,14 @@ export const AgentNode: FlowNodeTemplateType = {
     Input_Template_Dataset_Tag_Filter_Version,
     {
       key: NodeInputKeyEnum.collectionFilterMatch,
-      renderTypeList: [FlowNodeInputTypeEnum.datasetTagFilter, FlowNodeInputTypeEnum.reference],
+      renderTypeList: [FlowNodeInputTypeEnum.datasetTagFilter],
       label: i18nT('workflow:tag_filter'),
       valueType: WorkflowIOValueTypeEnum.string,
       isPro: true,
       description: i18nT('workflow:tag_filter_description')
-    }
+    },
+    Input_Template_History,
+    Input_Template_UserChatInput
   ],
   outputs: [
     {

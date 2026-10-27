@@ -32,6 +32,7 @@ import {
   checkWorkflowBeforeRunOrPublish,
   getWorkflowCheckErrorNodeIds
 } from '@/web/core/workflow/check/check';
+import { findWorkflowSandboxIssueNode } from '@/web/core/workflow/check/resource';
 import { getToolErrorMessage } from '@/web/core/workflow/check/message';
 import { PluginStatusEnum } from '@fastgpt/global/core/plugin/type';
 import { SystemToolSecretInputTypeEnum } from '@fastgpt/global/core/app/tool/systemTool/constants';
@@ -310,6 +311,110 @@ describe('checkWorkflowNodeIssues', () => {
         inputKey: NodeInputKeyEnum.skills
       })
     ]);
+
+    const t = ((key: string, params?: Record<string, unknown>) => {
+      const text = (commonZh as Record<string, string>)[key.replace('common:', '')] ?? key;
+      return text.replace(/\{\{(\w+)\}\}/g, (_, name) => String(params?.[name] ?? ''));
+    }) as TFunction;
+
+    agent.data.inputs.find((input) => input.key === NodeInputKeyEnum.skills)!.value = [
+      { skillId: 'skill-id', error: WorkflowCheckIssueCodeEnum.resourceMissing }
+    ];
+    agent.data.inputs.find((input) => input.key === NodeInputKeyEnum.datasetSelectList)!.value = [
+      { datasetId: 'dataset-id', error: WorkflowCheckIssueCodeEnum.resourceMissing }
+    ];
+    agent.data.inputs.find((input) => input.key === NodeInputKeyEnum.selectedTools)!.value = [
+      { id: 'systemTool-search', configStatus: 'waitingForConfig', config: {} }
+    ];
+
+    const abnormalResult = checkWorkflowBeforeRunOrPublish({ ...graph, t });
+    expect(abnormalResult.issueMap.agent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: WorkflowCheckIssueCodeEnum.agentToolAbnormal,
+          inputKey: NodeInputKeyEnum.selectedTools,
+          message: '引用的工具存在异常，请处理'
+        }),
+        expect.objectContaining({
+          code: WorkflowCheckIssueCodeEnum.resourceMissing,
+          inputKey: NodeInputKeyEnum.skills,
+          message: '引用的技能存在异常，请处理'
+        }),
+        expect.objectContaining({
+          code: WorkflowCheckIssueCodeEnum.resourceMissing,
+          inputKey: NodeInputKeyEnum.datasetSelectList,
+          message: '引用的知识库存在异常，请处理'
+        })
+      ])
+    );
+  });
+
+  it('checks sandbox availability and permission for Agent and ToolCall nodes', () => {
+    const t = ((key: string) => key) as TFunction;
+    const agent = makeNode('agent', FlowNodeTypeEnum.agent, {
+      inputs: [
+        {
+          key: NodeInputKeyEnum.useAgentSandbox,
+          label: 'sandbox',
+          renderTypeList: [FlowNodeInputTypeEnum.hidden],
+          value: false
+        },
+        {
+          key: NodeInputKeyEnum.skills,
+          label: 'skills',
+          renderTypeList: [FlowNodeInputTypeEnum.selectSkill],
+          value: [{ skillId: 'skill-1' }]
+        }
+      ]
+    });
+
+    expect(
+      findWorkflowSandboxIssueNode({
+        nodes: [startNode, agent],
+        showSandbox: false,
+        enableSandbox: true,
+        t
+      })
+    ).toEqual({
+      node: agent,
+      message: 'skill:sandbox_skill_unavailable_toast'
+    });
+
+    agent.data.inputs.find((input) => input.key === NodeInputKeyEnum.skills)!.value = [];
+    agent.data.inputs.find((input) => input.key === NodeInputKeyEnum.useAgentSandbox)!.value = true;
+
+    expect(
+      findWorkflowSandboxIssueNode({
+        nodes: [startNode, agent],
+        showSandbox: false,
+        enableSandbox: true,
+        t
+      })
+    ).toEqual({
+      node: agent,
+      message: 'skill:sandbox_system_not_configured_toast'
+    });
+
+    expect(
+      findWorkflowSandboxIssueNode({
+        nodes: [startNode, agent],
+        showSandbox: true,
+        enableSandbox: false,
+        t
+      })
+    ).toEqual({
+      node: agent,
+      message: 'app:sandbox_free_not_support'
+    });
+
+    expect(
+      findWorkflowSandboxIssueNode({
+        nodes: [startNode, agent],
+        showSandbox: true,
+        enableSandbox: true,
+        t
+      })
+    ).toBeUndefined();
   });
 
   it('collects multiple node errors in one pass', () => {

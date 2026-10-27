@@ -436,6 +436,33 @@ export const filterSensitiveNodesData = (nodes: StoreNodeItemType[]) => {
       });
     }
 
+    if (node.flowNodeType === FlowNodeTypeEnum.agent) {
+      node.inputs.forEach((input) => {
+        if (
+          input.key === NodeInputKeyEnum.skills ||
+          input.key === NodeInputKeyEnum.selectedTools ||
+          input.key === NodeInputKeyEnum.datasetSelectList
+        ) {
+          input.value = [];
+        } else if (
+          input.key === NodeInputKeyEnum.datasetParams &&
+          input.value &&
+          typeof input.value === 'object' &&
+          !Array.isArray(input.value)
+        ) {
+          input.value = {
+            ...input.value,
+            datasets: []
+          };
+        } else if (
+          input.key === NodeInputKeyEnum.aiSystemPrompt &&
+          typeof input.value === 'string'
+        ) {
+          input.value = input.value.replace(/\{\{@[^@{}]+@\}\}/g, '');
+        }
+      });
+    }
+
     for (const input of node.inputs) {
       if (input.key === NodeInputKeyEnum.systemInputConfig) {
         input.value = undefined;

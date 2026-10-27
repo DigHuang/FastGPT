@@ -116,7 +116,9 @@ export const createWorkflowAgentLoopRuntime = ({
       environment: {
         node: context.node,
         workflowStreamResponse,
-        streamReasoning: context.params.aiChatReasoning !== false,
+        streamAnswer: context.params.isResponseAnswerText !== false,
+        streamReasoning:
+          context.params.isResponseAnswerText !== false && context.params.aiChatReasoning !== false,
         shouldStreamTool: () => true,
         nodeResponses: artifacts.nodeResponses,
         appendNodeResponse,

@@ -12,17 +12,21 @@ describe('restoreDatasetParams', () => {
           ? 'saved-rerank'
           : input.key === NodeInputKeyEnum.datasetSearchExtensionModelId
             ? 'saved-llm'
-            : input.value
+            : input.key === NodeInputKeyEnum.collectionFilterMatch
+              ? '{"and":["tag1"]}'
+              : input.value
     }));
     const state = {
       rerankModelId: undefined,
       datasetSearchExtensionModelId: undefined,
+      collectionFilterMatch: '',
       similarity: 0.5
     };
     const restored = restoreDatasetParams({ state, inputs });
     expect(restored).toMatchObject({
       rerankModelId: 'saved-rerank',
-      datasetSearchExtensionModelId: 'saved-llm'
+      datasetSearchExtensionModelId: 'saved-llm',
+      collectionFilterMatch: '{"and":["tag1"]}'
     });
     const edited = { ...restored, similarity: 0.8 };
     expect(

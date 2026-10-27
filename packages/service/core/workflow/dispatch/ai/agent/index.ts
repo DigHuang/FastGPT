@@ -56,6 +56,7 @@ export type DispatchAgentModuleProps = ModuleDispatchProps<{
   [NodeInputKeyEnum.aiChatExtractFiles]?: boolean;
   [NodeInputKeyEnum.aiChatReasoning]?: boolean;
   [NodeInputKeyEnum.aiChatReasoningEffort]?: ReasoningEffort;
+  [NodeInputKeyEnum.aiChatIsResponseText]?: boolean;
   [NodeInputKeyEnum.fileUrlList]?: string[];
   [NodeInputKeyEnum.aiModelId]?: string;
   [NodeInputKeyEnum.aiModel]?: string;
@@ -138,7 +139,8 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
       sandboxEntrypoint,
       modelId,
       model,
-      aiChatReasoning
+      aiChatReasoning,
+      isResponseAnswerText = true
     }
   } = props;
   const datasetParams = getAgentDatasetParams(props.params);
@@ -179,10 +181,28 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
     effectiveUseAgentSandbox && useAgentSandbox ? sandboxEntrypoint : undefined;
   const skipSandboxInputFiles = runningAppInfo.sourceType === ChatSourceTypeEnum.skillEdit;
 
-  // 初始化对话框输入的文件
+  // 初始化对话框输入的文件；工作流 Agent 节点无独立 fileUrlList 输入项时默认解析对话上传文件
   const fileUrlInput = inputs.find((item) => item.key === NodeInputKeyEnum.fileUrlList);
-  const parseHistoryFiles = !!fileUrlInput?.value?.length;
+  const parseHistoryFiles = fileUrlInput ? !!fileUrlInput.value?.length : true;
   const fileLinks = parseHistoryFiles ? props.params.fileUrlList : undefined;
+  // 关闭流输出时，剔除回复正文、思考、工具卡片与 Plan 卡片等 UI 可见项，仅保留追问恢复与上下文压缩所需的隐藏元数据
+  const filterHiddenAssistantResponses = (
+    responses: AIChatItemValueItemType[]
+  ): AIChatItemValueItemType[] =>
+    responses.flatMap((item) => {
+      const hiddenItem: AIChatItemValueItemType = {
+        ...(item.id ? { id: item.id } : {}),
+        ...(item.askId ? { askId: item.askId } : {}),
+        ...(item.agentAsk ? { agentAsk: item.agentAsk } : {}),
+        ...(item.agentPlanUpdate ? { agentPlanUpdate: item.agentPlanUpdate } : {}),
+        ...(item.contextCheckpoint
+          ? { contextCheckpoint: item.contextCheckpoint, hideInUI: true }
+          : {})
+      };
+      return hiddenItem.agentAsk || hiddenItem.agentPlanUpdate || hiddenItem.contextCheckpoint
+        ? [hiddenItem]
+        : [];
+    });
 
   const provider = getWorkflowAgentLoopProvider();
   const memoryState = WorkflowMemoryState.fromWorkflow(props);
@@ -384,17 +404,25 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
           : undefined
       );
       return {
-        [DispatchNodeResponseKeyEnum.assistantResponses]: outputAssistantResponses,
+        [DispatchNodeResponseKeyEnum.assistantResponses]: isResponseAnswerText
+          ? outputAssistantResponses
+          : filterHiddenAssistantResponses(outputAssistantResponses),
         [DispatchNodeResponseKeyEnum.memories]: interactiveMemories,
         [DispatchNodeResponseKeyEnum.interactive]: outputSummary.interactive
       };
     }
 
     // 4. 结束态归一化。
-    // done 正常落 answer；error/aborted 转成可见文本，同时保留 error 输出给 workflow。
+    // done 正常落 answer；error/aborted 转成可见文本（开启错误捕获时不拼入可见文本），同时保留 error 输出给 workflow。
+    const finalText =
+      props.node.catchError &&
+      outputSummary.errorText &&
+      outputSummary.finalText === outputSummary.errorText
+        ? undefined
+        : outputSummary.finalText;
     const finalOutput = buildAgentLoopCoreFinalAssistantOutput({
       assistantResponses: outputAssistantResponses,
-      finalText: outputSummary.finalText,
+      finalText,
       reasoningText: outputSummary.reasoningText,
       hideReason: aiChatReasoning === false
     });
@@ -412,8 +440,18 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
       data: {
         [NodeOutputKeyEnum.answerText]: finalOutput.answerText
       },
+      ...(outputSummary.errorText && {
+        error: {
+          [NodeOutputKeyEnum.errorText]: outputSummary.errorText
+        }
+      }),
+      [DispatchNodeResponseKeyEnum.toolResponse]: outputSummary.errorText
+        ? { error: outputSummary.errorText }
+        : finalOutput.answerText,
       [DispatchNodeResponseKeyEnum.memories]: doneMemories,
-      [DispatchNodeResponseKeyEnum.assistantResponses]: finalOutput.assistantResponses
+      [DispatchNodeResponseKeyEnum.assistantResponses]: isResponseAnswerText
+        ? finalOutput.assistantResponses
+        : filterHiddenAssistantResponses(finalOutput.assistantResponses)
     };
     // 异常与错误分支输出必须同时返回，空错误文本也不能让节点走成功分支。
     return coreResult.status === 'error'
@@ -440,7 +478,9 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
     return {
       ...getNodeErrResponse({ error }),
       [DispatchNodeResponseKeyEnum.memories]: catchMemories,
-      [DispatchNodeResponseKeyEnum.assistantResponses]: assistantResponses
+      [DispatchNodeResponseKeyEnum.assistantResponses]: isResponseAnswerText
+        ? assistantResponses
+        : filterHiddenAssistantResponses(assistantResponses)
     };
   } finally {
     await nodeResponseCollector.flush();

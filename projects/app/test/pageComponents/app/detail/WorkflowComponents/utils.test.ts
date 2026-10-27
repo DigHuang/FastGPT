@@ -779,6 +779,67 @@ describe('WorkflowComponents utils', () => {
 
       expect(parsed[0].inputs[0].value).toEqual(['value1']);
     });
+
+    it('should filter skills, tools, datasets and prompt mentions for Agent nodes', () => {
+      const nodes = [
+        {
+          nodeId: 'agent',
+          name: 'Agent',
+          flowNodeType: FlowNodeTypeEnum.agent,
+          position: { x: 0, y: 0 },
+          inputs: [
+            {
+              key: NodeInputKeyEnum.skills,
+              label: '',
+              renderTypeList: [],
+              value: [{ skillId: 'skill-1', name: 'Skill 1' }]
+            },
+            {
+              key: NodeInputKeyEnum.selectedTools,
+              label: '',
+              renderTypeList: [],
+              value: [{ id: 'tool-1', name: 'Tool 1' }]
+            },
+            {
+              key: NodeInputKeyEnum.datasetSelectList,
+              label: '',
+              renderTypeList: [],
+              value: [{ datasetId: 'dataset-1' }]
+            },
+            {
+              key: NodeInputKeyEnum.datasetParams,
+              label: '',
+              renderTypeList: [],
+              value: {
+                datasets: [{ datasetId: 'dataset-1' }],
+                similarity: 0.4
+              }
+            },
+            {
+              key: NodeInputKeyEnum.aiSystemPrompt,
+              label: '',
+              renderTypeList: [],
+              value: '请结合 {{@dataset-1@}} 和 {{@skill-1@}} 回答 {{$start.userChatInput$}}'
+            }
+          ],
+          outputs: []
+        }
+      ] as any;
+
+      const filtered = filterSensitiveNodesData(nodes);
+      const inputMap = new Map(filtered[0].inputs.map((item: any) => [item.key, item.value]));
+
+      expect(inputMap.get(NodeInputKeyEnum.skills)).toEqual([]);
+      expect(inputMap.get(NodeInputKeyEnum.selectedTools)).toEqual([]);
+      expect(inputMap.get(NodeInputKeyEnum.datasetSelectList)).toEqual([]);
+      expect(inputMap.get(NodeInputKeyEnum.datasetParams)).toEqual({
+        datasets: [],
+        similarity: 0.4
+      });
+      expect(inputMap.get(NodeInputKeyEnum.aiSystemPrompt)).toBe(
+        '请结合  和  回答 {{$start.userChatInput$}}'
+      );
+    });
   });
 
   describe('getEditorVariables', () => {

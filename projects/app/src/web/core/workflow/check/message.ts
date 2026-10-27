@@ -69,6 +69,15 @@ const workflowCheckMessageKeys = {
   [WorkflowCheckIssueCodeEnum.modelRequired]: i18nT(
     'common:core.workflow.check.model_required_short'
   ),
+  [WorkflowCheckIssueCodeEnum.agentDatasetAbnormal]: i18nT(
+    'common:core.workflow.check.agent_dataset_abnormal'
+  ),
+  [WorkflowCheckIssueCodeEnum.agentSkillAbnormal]: i18nT(
+    'common:core.workflow.check.agent_skill_abnormal'
+  ),
+  [WorkflowCheckIssueCodeEnum.agentToolAbnormal]: i18nT(
+    'common:core.workflow.check.agent_tool_abnormal'
+  ),
   [WorkflowCheckIssueCodeEnum.resourceMissing]: i18nT(
     'common:core.workflow.check.resource_missing'
   ),
@@ -94,6 +103,9 @@ const WORKFLOW_CHECK_MESSAGE_ALIASES: Partial<
 
 /** 待处理：引用无效、工具不可访问或加载失败。其余均为待完善。 */
 const WORKFLOW_CHECK_PENDING_HANDLE_CODES = new Set<WorkflowCheckIssue['code']>([
+  WorkflowCheckIssueCodeEnum.agentDatasetAbnormal,
+  WorkflowCheckIssueCodeEnum.agentSkillAbnormal,
+  WorkflowCheckIssueCodeEnum.agentToolAbnormal,
   WorkflowCheckIssueCodeEnum.invalidReference,
   WorkflowCheckIssueCodeEnum.toolMissing,
   WorkflowCheckIssueCodeEnum.toolLoadFailed,
@@ -175,6 +187,12 @@ export const getWorkflowCheckIssueMessage = ({
       return t('common:core.workflow.check.model_unavailable_short', params);
     case WorkflowCheckIssueCodeEnum.modelRequired:
       return t('common:core.workflow.check.model_required_short', params);
+    case WorkflowCheckIssueCodeEnum.agentDatasetAbnormal:
+      return t('common:core.workflow.check.agent_dataset_abnormal', params);
+    case WorkflowCheckIssueCodeEnum.agentSkillAbnormal:
+      return t('common:core.workflow.check.agent_skill_abnormal', params);
+    case WorkflowCheckIssueCodeEnum.agentToolAbnormal:
+      return t('common:core.workflow.check.agent_tool_abnormal', params);
     case WorkflowCheckIssueCodeEnum.resourceMissing:
       return t('common:core.workflow.check.resource_missing', params);
     case WorkflowCheckIssueCodeEnum.resourceNoPermission:
