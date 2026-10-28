@@ -13,7 +13,7 @@
 | **节点开放范围** | 仅对**工作流应用**（`appSystemModuleTemplates`）开放，**不加入**工作流工具/插件（`pluginSystemModuleTemplates`），且**不加入** AI 辅助生成工作流白名单 |
 | **Agent 核心能力** | 保留多轮 Agent Loop（上限 100 轮）、任务规划（`plan`）、追问（`ask_user`）、技能（Skills + Sandbox 虚拟机）、工具/子应用调用、知识库检索、对话上传文件自动解析及上下文压缩能力 |
 | **输入配置项与顺序** | 输入项顺序严格对齐 Figma：`AI 模型` (`aiModel`) -> `提示词` (`aiSystemPrompt`) -> `虚拟机` (`useAgentSandbox`) -> `技能` (`skills`) -> `工具` (`selectedTools`) -> `知识库` (`datasetSelectList`) -> `聊天记录` (`history`) -> `用户问题` (`userChatInput`)；其中 `skills` 与 `selectedTools` **仅支持手动选择（不支持变量引用）**，`datasetSelectList` 支持**手动选择与变量引用**；`标签过滤` (`collectionFilterMatch`) 收敛至知识库「参数」弹窗中配置；**不提供**独立的 `fileUrlList`（文档链接）输入项，不暴露外部 `quoteQA` 端口 |
-| **工具调用支持（`isTool: true`）** | 支持被「工具调用」节点通过 `selectedTools` 句柄连接；仅 `aiSystemPrompt`、`history`、`userChatInput`（默认 AI 生成）支持 `agentGenerated`，`useAgentSandbox` 显式设置 `canAgentGenerated: false`；切换 `aiSystemPrompt` 为 AI 生成时清空提示词文本，节点配置的技能、工具、知识库仍生效 |
+| **工具调用支持（`isTool: true`）** | 支持被「工具调用」节点通过 `selectedTools` 句柄连接；仅 `aiSystemPrompt`、`history`、`userChatInput`（默认 AI 生成）支持 `agentGenerated`，`useAgentSandbox` 由 `canInputBeAgentGenerated` 统一拦截禁用 AI 生成；切换 `aiSystemPrompt` 为 AI 生成时清空提示词文本，节点配置的技能、工具、知识库仍生效 |
 | **Ask 追问与交互性** | `ask_user` 内置开启（无开关）；`FlowNodeTypeEnum.agent` 纳入 `INTERACTIVE_NODE_TYPES`，自动禁用应用评测并禁止放入 `parallelRun` 并行节点内部 |
 | **流输出控制（`aiChatIsResponseText`）** | 关闭流输出（勾选「不返回输出内容」）时，**完全不向对话气泡展示 Agent 节点内容**（正文、思考过程、工具调用卡片、技能调用卡片、Plan 规划卡片与状态），但**不限制 `ask_user` 追问交互**；`answerText` 正常向后游传递，运行详情正常写入 `nodeResponses` |
 | **错误捕获（`catchError`）** | Agent Loop 内部调用工具或技能产生的执行错误由 Agent Loop 自行消化处理，不触发节点级错误捕获；模型调用失败等节点级错误触发工作流 `catchError`，且在开启 `catchError` 时不在对话气泡中追加错误文本 |
@@ -37,7 +37,7 @@
 - 输入项（`inputs`）配置与顺序（对齐 Figma `node-id=3820-7237`）：
   1. `aiModel`：模型选择与基础配置（保留回复上限 `showMaxToken`、多模态识别/提取对话文件 `showMultimodalConfig`、隐藏 AI 输出）及思考配置，隐藏高级 LLM 参数（温度、TopP、停止序列、返回格式）。
   2. `aiSystemPrompt`：`renderTypeList` 设为 `[FlowNodeInputTypeEnum.textarea, FlowNodeInputTypeEnum.reference, FlowNodeInputTypeEnum.agentGenerated]`，补充 `toolDescription`，并在富文本编辑器中输入 `@` 时支持关联并高亮节点已选的技能（`skills`）、工具（`selectedTools`）、知识库（`datasetSelectList`）及自动开启虚拟机。
-  3. `useAgentSandbox`：显式标记 `canAgentGenerated: false`，避免在被工具调用连接时被自动注入 `agentGenerated` 渲染类型。
+  3. `useAgentSandbox`：在 `canInputBeAgentGenerated` 中按 `NodeInputKeyEnum.useAgentSandbox` 统一禁用，避免在被工具调用连接时被自动注入 `agentGenerated` 渲染类型。
   4. `skills`：`renderTypeList: [FlowNodeInputTypeEnum.selectSkill]`（仅支持手动选择，不支持变量引用）。
   5. `selectedTools`：`renderTypeList: [FlowNodeInputTypeEnum.selectTool]`（仅支持手动选择，不支持变量引用）。
   6. `datasetSelectList`：`renderTypeList: [FlowNodeInputTypeEnum.selectDataset, FlowNodeInputTypeEnum.reference]`（支持「手动选择」与「变量引用」切换），搜索参数及 `collectionFilterMatch`（标签过滤）统一在知识库「参数」弹窗（`DatasetParamsModal`）中配置。
@@ -110,7 +110,7 @@
      ```
    - 在 `packages/service/core/workflow/dispatch/ai/agentLoopCore/adapter/eventStream/createEventStream.ts` 中，除原有的正文、思考、工具调用受 `streamAnswer` 控制外，为 `streamPlanStatus` 与 `streamPlan` 补充 `if (!streamAnswer) return;` 守卫，确保关闭流输出时不会向前端推送 Plan 状态与规划卡片事件。
 2. **`assistantResponses` 可见内容过滤**：
-   - 在 `packages/service/core/workflow/dispatch/ai/agent/index.ts` 中，当 `isResponseAnswerText === false` 时通过 `filterHiddenStreamAssistantResponses` 过滤 `assistantResponses`，剔除 `text`、`reasoning`、`tools`、`skills`、`plan`、`planStatus` 等 UI 可见字段，仅保留恢复运行所需的隐藏元数据（`agentAsk`、`agentPlanUpdate`、`contextCheckpoint`）。
+   - 在 `packages/service/core/workflow/dispatch/ai/agent/index.ts` 中，当 `isResponseAnswerText === false` 时通过 `filterHiddenAssistantResponses` 过滤 `assistantResponses`，剔除 `text`、`reasoning`、`tools`、`skills`、`plan`、`planStatus` 等 UI 可见字段，仅保留恢复运行所需的隐藏元数据（`agentAsk`、`agentPlanUpdate`、`contextCheckpoint`）。
    - 若触发 `ask_user`（`outputSummary.finishReason === 'interactive'`），`[DispatchNodeResponseKeyEnum.interactive]` 照常返回，驱动前端渲染追问表单。
    - `data[NodeOutputKeyEnum.answerText]` 与 `[DispatchNodeResponseKeyEnum.nodeResponse]` 照常返回，不影响下游节点引用与运行详情查看。
 
@@ -142,8 +142,7 @@
      - `(tool.status ?? tool.pluginData?.status) === PluginStatusEnum.Offline`
      - `Boolean(tool.pluginData?.error)`
      - `tool.configStatus === 'invalid' || tool.configStatus === 'waitingForConfig'`
-     - `Array.isArray(tool.inputs) && getToolConfigStatus({ tool }).status === 'waitingForConfig'`
-     - `resources.toolExistsMap?.get(tool.id) === false`
+     - `Array.isArray(tool.inputs) && ['invalid', 'waitingForConfig'].includes(getToolConfigStatus({ tool }).status)`
    - **技能检查（`skills`）**：当技能缺失或无权限时，保留底层 `code`（`resourceMissing` / `resourceNoPermission`），并设置 `messageCode: WorkflowCheckIssueCodeEnum.agentSkillAbnormal`。
    - **知识库检查（`datasetSelectList` / `datasetParams.datasets`）**：当节点为 `FlowNodeTypeEnum.agent` 且知识库缺失或无权限时，设置 `messageCode: WorkflowCheckIssueCodeEnum.agentDatasetAbnormal`。
 

@@ -1,4 +1,5 @@
 import { WorkflowCheckIssueCodeEnum } from '@fastgpt/global/core/workflow/diagnostic/constants';
+import { getToolConfigStatus } from '@fastgpt/global/core/app/formEdit/utils';
 import { checkStoreWorkflowBeforeRunOrPublish } from '@/web/core/workflow/service';
 import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
 import type { TFunction } from 'next-i18next';
@@ -77,7 +78,10 @@ export const checkAppFormResourceIssues = ({
     });
     if (error) return error;
 
-    if (tool.configStatus === 'invalid') {
+    const configStatus =
+      tool.configStatus ??
+      (Array.isArray(tool.inputs) ? getToolConfigStatus({ tool }).status : undefined);
+    if (configStatus === 'invalid' || configStatus === 'waitingForConfig') {
       return t('app:app.error.publish_unExist_app');
     }
   }

@@ -18,6 +18,7 @@ import {
   migrateToolInputConfig,
   normalizeFlowNodeInputType,
   parseJsonEditorValue,
+  serializeAgentTool,
   stripToolInputDefaultMode
 } from '@fastgpt/global/core/app/formEdit/utils';
 import {
@@ -1883,5 +1884,36 @@ describe('AgentNode workflow template & tool mode normalization', () => {
       FlowNodeInputTypeEnum.selectDataset,
       FlowNodeInputTypeEnum.reference
     ]);
+  });
+
+  it('preserves name, avatar, and invalid tool snapshots in serializeAgentTool', () => {
+    const invalidTool = {
+      id: 'missing-tool',
+      pluginId: 'missing-tool',
+      name: 'Missing Tool',
+      avatar: 'icon/missing',
+      version: '1.0.0',
+      templateType: 'personalTool',
+      flowNodeType: FlowNodeTypeEnum.tool,
+      intro: '',
+      showStatus: false,
+      weight: 0,
+      isTool: true,
+      outputs: [],
+      configStatus: 'invalid' as const,
+      inputs: [{ key: 'query', mode: 'agentGenerated' }] as any,
+      config: { apiKey: 'secret-key' }
+    };
+
+    expect(serializeAgentTool({ tool: invalidTool })).toEqual({
+      id: 'missing-tool',
+      name: 'Missing Tool',
+      avatar: 'icon/missing',
+      version: '1.0.0',
+      source: undefined,
+      toolConfig: undefined,
+      inputs: [{ key: 'query', mode: 'agentGenerated' }],
+      config: { apiKey: 'secret-key' }
+    });
   });
 });

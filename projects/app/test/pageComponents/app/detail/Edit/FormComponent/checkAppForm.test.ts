@@ -101,17 +101,20 @@ describe('checkAppFormResourceIssues', () => {
       expect(result).toBe('该工具不存在或已被删除');
     });
 
-    it('should return publish_unExist_app when tool config is invalid', () => {
-      const appForm = getDefaultAppForm();
-      appForm.selectedTools = [
-        createMockTool({
-          configStatus: 'invalid'
-        })
-      ];
+    it.each(['invalid', 'waitingForConfig'] as const)(
+      'should return publish_unExist_app when tool configStatus is %s',
+      (configStatus) => {
+        const appForm = getDefaultAppForm();
+        appForm.selectedTools = [
+          createMockTool({
+            configStatus
+          })
+        ];
 
-      const result = checkAppFormResourceIssues({ appForm, t: mockT });
-      expect(result).toBe('发布失败，请检查工具配置是否正确');
-    });
+        const result = checkAppFormResourceIssues({ appForm, t: mockT });
+        expect(result).toBe('发布失败，请检查工具配置是否正确');
+      }
+    );
   });
 
   describe('dataset and skill resource checks', () => {

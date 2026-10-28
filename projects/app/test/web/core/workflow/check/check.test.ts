@@ -287,7 +287,17 @@ describe('checkWorkflowNodeIssues', () => {
   it('accepts sparse Agent tool and Skill snapshots and preserves explicit resource errors', () => {
     const values = new Map<string, unknown>([
       [NodeInputKeyEnum.aiModelId, 'llm-id'],
-      [NodeInputKeyEnum.selectedTools, [{ id: 'systemTool-search', config: {} }]],
+      [
+        NodeInputKeyEnum.selectedTools,
+        [
+          { id: 'systemTool-search', config: {}, inputs: [] },
+          {
+            id: 'plugin-search',
+            config: {},
+            inputs: [{ key: 'query', mode: 'agentGenerated' }]
+          }
+        ]
+      ],
       [NodeInputKeyEnum.skills, [{ skillId: 'skill-id' }]],
       [NodeInputKeyEnum.datasetSelectList, [{ datasetId: 'dataset-id' }]]
     ]);
@@ -324,7 +334,20 @@ describe('checkWorkflowNodeIssues', () => {
       { datasetId: 'dataset-id', error: WorkflowCheckIssueCodeEnum.resourceMissing }
     ];
     agent.data.inputs.find((input) => input.key === NodeInputKeyEnum.selectedTools)!.value = [
-      { id: 'systemTool-search', configStatus: 'waitingForConfig', config: {} }
+      {
+        id: 'systemTool-search',
+        config: {},
+        inputs: [
+          {
+            key: 'apiKey',
+            label: 'API Key',
+            renderTypeList: [FlowNodeInputTypeEnum.input],
+            selectedType: FlowNodeInputTypeEnum.input,
+            required: true,
+            value: ''
+          }
+        ]
+      }
     ];
 
     const abnormalResult = checkWorkflowBeforeRunOrPublish({ ...graph, t });

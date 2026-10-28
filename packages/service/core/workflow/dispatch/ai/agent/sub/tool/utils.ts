@@ -637,11 +637,11 @@ export const getAgentRuntimeTools = async ({
           }
         });
 
-        // 缺少必填运行配置时，不把该工具注册给模型，避免模型调用后才失败。
+        // 缺少必填运行配置或配置无效时，不把该工具注册给模型，避免模型调用后才失败。
         const configStatus = getToolConfigStatus({
           tool: toolNode
         });
-        if (configStatus.status === 'waitingForConfig') {
+        if (configStatus.status === 'waitingForConfig' || configStatus.status === 'invalid') {
           getLogger(LogCategories.MODULE.AI.AGENT).warn(`[Agent] tool config incomplete`, {
             toolId: tool.id,
             toolName: toolNode.name

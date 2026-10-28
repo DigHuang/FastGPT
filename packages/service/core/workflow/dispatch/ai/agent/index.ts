@@ -189,20 +189,9 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
   const filterHiddenAssistantResponses = (
     responses: AIChatItemValueItemType[]
   ): AIChatItemValueItemType[] =>
-    responses.flatMap((item) => {
-      const hiddenItem: AIChatItemValueItemType = {
-        ...(item.id ? { id: item.id } : {}),
-        ...(item.askId ? { askId: item.askId } : {}),
-        ...(item.agentAsk ? { agentAsk: item.agentAsk } : {}),
-        ...(item.agentPlanUpdate ? { agentPlanUpdate: item.agentPlanUpdate } : {}),
-        ...(item.contextCheckpoint
-          ? { contextCheckpoint: item.contextCheckpoint, hideInUI: true }
-          : {})
-      };
-      return hiddenItem.agentAsk || hiddenItem.agentPlanUpdate || hiddenItem.contextCheckpoint
-        ? [hiddenItem]
-        : [];
-    });
+    responses.filter((item) =>
+      Boolean(item.agentAsk || item.agentPlanUpdate || item.contextCheckpoint)
+    );
 
   const provider = getWorkflowAgentLoopProvider();
   const memoryState = WorkflowMemoryState.fromWorkflow(props);

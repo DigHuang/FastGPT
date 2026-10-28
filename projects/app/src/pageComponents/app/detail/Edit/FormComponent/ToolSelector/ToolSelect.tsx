@@ -23,6 +23,7 @@ import MyTag from '@fastgpt/web/components/common/Tag/index';
 import MyIconButton from '@fastgpt/web/components/common/Icon/button';
 import type { MyLLMModelItemType } from '@fastgpt/global/openapi/core/ai/model/api';
 import { isDebugToolSource, getToolIdentityKey } from '@fastgpt/global/core/app/tool/utils';
+import { getToolConfigStatus } from '@fastgpt/global/core/app/formEdit/utils';
 import DebugToolTag from '@fastgpt/web/components/core/plugin/tool/DebugToolTag';
 import { getToolErrorMessage } from '@/web/core/workflow/check/message';
 
@@ -219,7 +220,7 @@ const ToolSelect = ({
           onAddTool={(e) => {
             onUpdateTool({
               ...e,
-              configStatus: 'configured'
+              configStatus: e.configStatus ?? getToolConfigStatus({ tool: e }).status
             });
           }}
         />

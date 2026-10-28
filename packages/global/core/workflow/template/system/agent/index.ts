@@ -137,7 +137,6 @@ export const AgentNode: FlowNodeTemplateType = {
       label: i18nT('app:use_agent_sandbox'),
       description: i18nT('app:use_computer_desc'),
       valueType: WorkflowIOValueTypeEnum.boolean,
-      canAgentGenerated: false,
       value: false
     },
     {

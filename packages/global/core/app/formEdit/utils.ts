@@ -402,7 +402,7 @@ export const getAgentToolInputMode = (input: InputRenderTypeState) =>
     ? AgentToolInputModeEnum.agentGenerated
     : AgentToolInputModeEnum.manual;
 
-/** 将应用内完整 NodeIO 工具投影为 Agent 持久化所需的稀疏配置。 */
+/** 将应用内完整 NodeIO 工具投影为 Agent 持久化所需的稀疏配置；失效工具保留原始 inputs 与 config 快照。 */
 export const serializeAgentTool = ({
   tool,
   maxHistories
@@ -410,6 +410,7 @@ export const serializeAgentTool = ({
   tool: SelectedToolItemType;
   maxHistories?: number;
 }) => {
+  const isInvalidTool = tool.configStatus === 'invalid';
   const config = tool.inputs.reduce<Record<string, unknown>>((acc, input) => {
     if (input.key === NodeInputKeyEnum.forbidStream) return acc;
     if (
@@ -426,15 +427,21 @@ export const serializeAgentTool = ({
 
   return {
     id: tool.pluginId ?? tool.id,
+    name: tool.name,
+    avatar: tool.avatar,
     version: tool.version,
     ...(tool.metadataLocale !== undefined ? { metadataLocale: tool.metadataLocale } : {}),
     source: tool.source,
     toolConfig: tool.toolConfig,
-    inputs: tool.inputs.filter(canInputBeAgentGenerated).map((input) => ({
-      key: input.key,
-      mode: getAgentToolInputMode(input)
-    })),
-    config: filterToolConfiguredParams({ params: config, inputs: tool.inputs })
+    inputs: isInvalidTool
+      ? tool.inputs
+      : tool.inputs.filter(canInputBeAgentGenerated).map((input) => ({
+          key: input.key,
+          mode: getAgentToolInputMode(input)
+        })),
+    config: isInvalidTool
+      ? (tool.config ?? {})
+      : filterToolConfiguredParams({ params: config, inputs: tool.inputs })
   };
 };
 

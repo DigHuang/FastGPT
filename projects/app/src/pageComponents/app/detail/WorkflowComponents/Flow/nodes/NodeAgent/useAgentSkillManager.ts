@@ -2,7 +2,6 @@ import { useCallback, useMemo } from 'react';
 import { useContextSelector } from 'use-context-selector';
 import { WorkflowActionsContext } from '../../../context/workflowActionsContext';
 import { useSkillManager } from '@/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager';
-import { AGENT_SANDBOX_TOOLSET_ID } from '@fastgpt/global/core/ai/sandbox/tools';
 import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { nodeInputIsReference } from '@fastgpt/global/common/workflow/reference';
 import type { FlowNodeInputItemType } from '@fastgpt/global/core/workflow/type/io';
@@ -10,6 +9,7 @@ import type {
   SelectedAgentSkillItemType,
   SelectedToolItemType
 } from '@fastgpt/global/core/app/formEdit/type';
+import { getToolConfigStatus } from '@fastgpt/global/core/app/formEdit/utils';
 import { getToolIdentityKey } from '@fastgpt/global/core/app/tool/utils';
 
 /**
@@ -38,7 +38,15 @@ export const useAgentSkillManager = ({
     [inputs]
   );
   const selectedTools: SelectedToolItemType[] = useMemo(
-    () => (Array.isArray(toolsInput?.value) ? toolsInput!.value : []),
+    () =>
+      Array.isArray(toolsInput?.value)
+        ? toolsInput.value.map((tool: SelectedToolItemType) => ({
+            ...tool,
+            configStatus:
+              tool.configStatus ??
+              (Array.isArray(tool.inputs) ? getToolConfigStatus({ tool }).status : undefined)
+          }))
+        : [],
     [toolsInput]
   );
 
@@ -120,37 +128,16 @@ export const useAgentSkillManager = ({
     onUpdateOrAddTool,
     onDeleteTool,
     onAddAgentSkill,
+    onEnableSandbox,
     canUploadFile,
     hasSelectedDataset,
     useAgentSandbox,
     onClickDatasetSearch
   });
 
-  const promptSkillOption = useMemo(
-    () => ({
-      ...skillOption,
-      onSelect: async (id: string) => {
-        const option = await skillOption.onSelect?.(id);
-        if (!option?.onClick) return option;
-
-        return {
-          ...option,
-          onClick: async (toolId: string) => {
-            const result = await option.onClick?.(toolId);
-            if (result?.id === AGENT_SANDBOX_TOOLSET_ID && !useAgentSandbox) {
-              onEnableSandbox?.();
-            }
-            return result;
-          }
-        };
-      }
-    }),
-    [onEnableSandbox, skillOption, useAgentSandbox]
-  );
-
   return {
     selectedTools,
-    skillOption: promptSkillOption,
+    skillOption,
     selectedSkills,
     onClickSkill,
     onRemoveSkill,

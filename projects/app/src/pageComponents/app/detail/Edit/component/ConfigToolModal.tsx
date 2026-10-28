@@ -928,7 +928,7 @@ const ConfigToolModal = ({
   });
 
   const onSubmit = handleSubmit((data) => {
-    onAddTool({
+    const nextTool: SelectedToolItemType = {
       ...editingTool,
       inputs: editingTool.inputs.map((input) => {
         if (!shouldShowConfigInput(input)) {
@@ -961,6 +961,11 @@ const ConfigToolModal = ({
                 })()
         });
       })
+    };
+
+    onAddTool({
+      ...nextTool,
+      configStatus: getToolConfigStatus({ tool: nextTool }).status
     });
     onCloseConfigTool();
   });

@@ -29,10 +29,8 @@ import type { FlowNodeInputItemType } from '@fastgpt/global/core/workflow/type/i
 import { getAppChatConfig } from '@fastgpt/global/common/app/chat';
 import { Input_Template_File_Link } from '@fastgpt/global/core/workflow/template/input';
 import {
-  canInputBeAgentGenerated,
-  filterToolConfiguredParams,
-  getAgentToolInputMode,
   getToolConfigStatus,
+  serializeAgentTool,
   validateToolConfiguration
 } from '@fastgpt/global/core/app/formEdit/utils';
 import { getNewToolPreviewNode } from '@/web/core/app/api/tool';
@@ -81,12 +79,12 @@ export const appWorkflow2AgentForm = ({
         NodeInputKeyEnum.sandboxEntrypoint
       );
 
-      const tools = inputMap.get(NodeInputKeyEnum.selectedTools) as FlowNodeTemplateType[];
+      const tools = inputMap.get(NodeInputKeyEnum.selectedTools) as SelectedToolItemType[];
       if (tools) {
         defaultAppForm.selectedTools = tools.map((tool) => ({
           ...tool,
           id: tool.pluginId!,
-          configStatus: getToolConfigStatus({ tool }).status
+          configStatus: tool.configStatus ?? getToolConfigStatus({ tool }).status
         }));
       }
 
@@ -293,41 +291,12 @@ export function agentForm2AppWorkflow(
               renderTypeList: [FlowNodeInputTypeEnum.hidden], // Set in the pop-up window
               label: '',
               valueType: WorkflowIOValueTypeEnum.arrayObject,
-              value: data.selectedTools.map((tool) => {
-                const config = tool.inputs.reduce(
-                  (acc, input) => {
-                    if (input.key === NodeInputKeyEnum.forbidStream) {
-                      return acc;
-                    }
-                    // Special tool
-                    if (
-                      tool.flowNodeType === FlowNodeTypeEnum.appModule &&
-                      input.key === NodeInputKeyEnum.history
-                    ) {
-                      acc[input.key] = data.aiSettings.maxHistories;
-                    }
-                    acc[input.key] = input.value;
-                    return acc;
-                  },
-                  {} as Record<string, any>
-                );
-
-                return {
-                  id: tool.pluginId,
-                  name: tool.name,
-                  avatar: tool.avatar,
-                  version: tool.version,
-                  source: tool.source,
-                  metadataLocale: tool.metadataLocale,
-                  toolConfig: tool.toolConfig,
-                  inputs: tool.inputs.filter(canInputBeAgentGenerated).map((input) => ({
-                    key: input.key,
-                    mode: getAgentToolInputMode(input)
-                  })),
-
-                  config: filterToolConfiguredParams({ params: config, inputs: tool.inputs })
-                };
-              })
+              value: data.selectedTools.map((tool) =>
+                serializeAgentTool({
+                  tool,
+                  maxHistories: data.aiSettings.maxHistories
+                })
+              )
             },
             // Dataset configuration
             {

@@ -166,11 +166,25 @@ describe('WorkflowComponents utils', () => {
                     id: 'search',
                     pluginId: 'search',
                     name: 'Search',
+                    avatar: 'icon/search',
                     flowNodeType: FlowNodeTypeEnum.tool,
                     version: '1.0.0',
                     metadataLocale: 'zh-CN',
                     inputs: [],
                     outputs: []
+                  },
+                  {
+                    id: 'deleted-tool',
+                    pluginId: 'deleted-tool',
+                    name: 'Deleted Tool',
+                    avatar: 'icon/deleted',
+                    flowNodeType: FlowNodeTypeEnum.tool,
+                    version: '1.0.0',
+                    configStatus: 'invalid',
+                    inputs: [{ key: 'query', mode: 'agentGenerated' }],
+                    config: { apiKey: 'secret-val' },
+                    outputs: [],
+                    pluginData: { error: 'tool_missing' }
                   }
                 ]
               }
@@ -184,7 +198,19 @@ describe('WorkflowComponents utils', () => {
       const result = uiWorkflow2StoreWorkflow({ nodes, edges: [] });
 
       expect(result.nodes[0].inputs[0].value).toEqual([
-        expect.objectContaining({ metadataLocale: 'zh-CN' })
+        expect.objectContaining({
+          id: 'search',
+          name: 'Search',
+          avatar: 'icon/search',
+          metadataLocale: 'zh-CN'
+        }),
+        expect.objectContaining({
+          id: 'deleted-tool',
+          name: 'Deleted Tool',
+          avatar: 'icon/deleted',
+          inputs: [{ key: 'query', mode: 'agentGenerated' }],
+          config: { apiKey: 'secret-val' }
+        })
       ]);
     });
 

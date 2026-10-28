@@ -90,6 +90,29 @@ const agentModelSettingProps = {
   showResponseFormat: false
 };
 
+const MODEL_SETTING_INPUT_KEYS = new Set<NodeInputKeyEnum>([
+  NodeInputKeyEnum.aiModelId,
+  NodeInputKeyEnum.aiModel,
+  NodeInputKeyEnum.aiChatTemperature,
+  NodeInputKeyEnum.aiChatMaxToken,
+  NodeInputKeyEnum.aiChatIsResponseText,
+  NodeInputKeyEnum.aiChatVision,
+  NodeInputKeyEnum.aiChatAudio,
+  NodeInputKeyEnum.aiChatVideo,
+  NodeInputKeyEnum.aiChatExtractFiles,
+  NodeInputKeyEnum.aiChatReasoning,
+  NodeInputKeyEnum.aiChatReasoningEffort,
+  NodeInputKeyEnum.aiChatTopP,
+  NodeInputKeyEnum.aiChatStopSign,
+  NodeInputKeyEnum.aiChatResponseFormat,
+  NodeInputKeyEnum.aiChatJsonSchema
+]);
+
+const CHAT_INPUT_KEYS = new Set<NodeInputKeyEnum>([
+  NodeInputKeyEnum.history,
+  NodeInputKeyEnum.userChatInput
+]);
+
 const chooseButtonTooltipProps = {
   offset: [0, 8] as [number, number],
   px: 3,
@@ -216,65 +239,18 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
   );
 
   // Split commonInputs into groups
-  const modelSettingInputKeys = useMemo(
-    () =>
-      new Set([
-        NodeInputKeyEnum.aiModelId,
-        NodeInputKeyEnum.aiModel,
-        NodeInputKeyEnum.aiChatTemperature,
-        NodeInputKeyEnum.aiChatMaxToken,
-        NodeInputKeyEnum.aiChatIsResponseText,
-        NodeInputKeyEnum.aiChatVision,
-        NodeInputKeyEnum.aiChatAudio,
-        NodeInputKeyEnum.aiChatVideo,
-        NodeInputKeyEnum.aiChatExtractFiles,
-        NodeInputKeyEnum.aiChatReasoning,
-        NodeInputKeyEnum.aiChatReasoningEffort,
-        NodeInputKeyEnum.aiChatTopP,
-        NodeInputKeyEnum.aiChatStopSign,
-        NodeInputKeyEnum.aiChatResponseFormat,
-        NodeInputKeyEnum.aiChatJsonSchema
-      ]),
-    []
-  );
-  const manualKeys = useMemo(
-    () =>
-      new Set([
-        ...modelSettingInputKeys,
-        NodeInputKeyEnum.aiSystemPrompt,
-        NodeInputKeyEnum.skills,
-        NodeInputKeyEnum.useAgentSandbox,
-        NodeInputKeyEnum.sandboxEntrypoint,
-        NodeInputKeyEnum.selectedTools
-      ]),
-    [modelSettingInputKeys]
-  );
   const modelInputs = useMemo(
-    () => commonInputs.filter((i) => modelSettingInputKeys.has(i.key as NodeInputKeyEnum)),
-    [commonInputs, modelSettingInputKeys]
+    () => commonInputs.filter((i) => MODEL_SETTING_INPUT_KEYS.has(i.key as NodeInputKeyEnum)),
+    [commonInputs]
   );
   // Inputs rendered after dataset (history, userChatInput)
-  const chatInputKeys = useMemo(
-    () => new Set([NodeInputKeyEnum.history, NodeInputKeyEnum.userChatInput]),
-    []
-  );
   const chatInputs = useMemo(
-    () => commonInputs.filter((i) => chatInputKeys.has(i.key as NodeInputKeyEnum)),
-    [commonInputs, chatInputKeys]
-  );
-  // Dataset inputs
-  const datasetInputs = useMemo(
-    () =>
-      commonInputs.filter(
-        (i) =>
-          !manualKeys.has(i.key as NodeInputKeyEnum) &&
-          !chatInputKeys.has(i.key as NodeInputKeyEnum)
-      ),
-    [commonInputs, manualKeys, chatInputKeys]
+    () => commonInputs.filter((i) => CHAT_INPUT_KEYS.has(i.key as NodeInputKeyEnum)),
+    [commonInputs]
   );
   const datasetSelectInput = useMemo(
-    () => datasetInputs.find((i) => i.key === NodeInputKeyEnum.datasetSelectList),
-    [datasetInputs]
+    () => commonInputs.find((i) => i.key === NodeInputKeyEnum.datasetSelectList),
+    [commonInputs]
   );
   const datasetSelectRenderType = useMemo(
     () =>
@@ -295,22 +271,18 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
   );
   const handlePruneTagFilter = useCallback(
     (nextFilter: DatasetTagFilterValue) => {
-      for (const input of getDatasetSearchParamInputs({
-        inputs,
-        values: {
-          ...datasetParamsData,
-          collectionFilterMatch: nextFilter
-        }
-      })) {
-        if (input.key !== NodeInputKeyEnum.collectionFilterMatch) continue;
-        if (inputs.some((item) => item.key === input.key)) {
-          onChangeNode({ nodeId, type: 'updateInput', key: input.key, value: input });
-        } else {
-          onChangeNode({ nodeId, type: 'addInput', value: input });
-        }
-      }
+      const filterInput = inputs.find(
+        (item) => item.key === NodeInputKeyEnum.collectionFilterMatch
+      );
+      if (!filterInput) return;
+      onChangeNode({
+        nodeId,
+        type: 'updateInput',
+        key: NodeInputKeyEnum.collectionFilterMatch,
+        value: { ...filterInput, value: nextFilter }
+      });
     },
-    [datasetParamsData, inputs, nodeId, onChangeNode]
+    [inputs, nodeId, onChangeNode]
   );
   useDatasetTagFilterPrune({
     datasetIds,
@@ -329,8 +301,8 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
     onOpenDatasetSelect();
   }, [datasetSelectRenderType, onOpenDatasetParams, onOpenDatasetSelect, selectedDatasets.length]);
   const authTmbIdInput = useMemo(
-    () => datasetInputs.find((i) => i.key === NodeInputKeyEnum.authTmbId),
-    [datasetInputs]
+    () => commonInputs.find((i) => i.key === NodeInputKeyEnum.authTmbId),
+    [commonInputs]
   );
 
   const onChangeAuthTmbId = useCallback(
@@ -421,13 +393,13 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
     onOpen: onOpenRecharge,
     onClose: onCloseRecharge
   } = useDisclosure();
-  const openSkillSelect = useCallback(() => {
+  const checkSkillSandboxAvailable = useCallback(() => {
     if (!showSandbox) {
       toast({
         status: 'warning',
         title: t('skill:sandbox_skill_system_not_configured_toast')
       });
-      return;
+      return false;
     }
     if (!enableSandbox) {
       openConfirm({
@@ -438,40 +410,18 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
         cancelText: t('common:Close'),
         showCancel: isTeamAdmin
       })();
-      return;
+      return false;
     }
+    return true;
+  }, [enableSandbox, isTeamAdmin, onOpenRecharge, openConfirm, showSandbox, t, toast]);
+  const openSkillSelect = useCallback(() => {
+    if (!checkSkillSandboxAvailable()) return;
     onOpenSkillSelect();
-  }, [
-    enableSandbox,
-    onOpenSkillSelect,
-    showSandbox,
-    t,
-    toast,
-    isTeamAdmin,
-    onOpenRecharge,
-    openConfirm
-  ]);
+  }, [checkSkillSandboxAvailable, onOpenSkillSelect]);
   const onAddAgentSkill = useCallback(
     (skill: SelectedAgentSkillItemType) => {
       if (!skillsInput) return false;
-      if (!showSandbox) {
-        toast({
-          status: 'warning',
-          title: t('skill:sandbox_skill_system_not_configured_toast')
-        });
-        return false;
-      }
-      if (!enableSandbox) {
-        openConfirm({
-          title: t('skill:sandbox_plan_not_supported_title'),
-          customContent: t('skill:sandbox_skill_plan_not_supported_content'),
-          onConfirm: isTeamAdmin ? onOpenRecharge : undefined,
-          confirmText: isTeamAdmin ? t('skill:sandbox_upgrade_action') : t('common:Close'),
-          cancelText: t('common:Close'),
-          showCancel: isTeamAdmin
-        })();
-        return false;
-      }
+      if (!checkSkillSandboxAvailable()) return false;
 
       onChangeNode([
         {
@@ -506,15 +456,11 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
       return true;
     },
     [
-      enableSandbox,
-      isTeamAdmin,
+      checkSkillSandboxAvailable,
       nodeId,
       onChangeNode,
-      onOpenRecharge,
-      openConfirm,
       sandboxInput,
       selectedAgentSkills,
-      showSandbox,
       skillsInput,
       t,
       toast
@@ -810,7 +756,7 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
                     error: item.pluginData?.error,
                     t
                   });
-                  const hasToolError = !!toolError;
+                  const hasToolError = Boolean(toolError) || item.configStatus === 'invalid';
                   const isUnconfigured = item.configStatus === 'waitingForConfig';
                   const isDebugTool = isDebugToolSource(item.source);
 

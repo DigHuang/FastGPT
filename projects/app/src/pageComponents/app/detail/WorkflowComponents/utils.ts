@@ -32,7 +32,7 @@ import {
   normalizeFlowNodeInputType,
   serializeAgentTool
 } from '@fastgpt/global/core/app/formEdit/utils';
-import { SelectedToolItemTypeSchema } from '@fastgpt/global/core/app/formEdit/type';
+import type { SelectedToolItemType } from '@fastgpt/global/core/app/formEdit/type';
 import { type TFunction } from 'i18next';
 import { type Edge, type Node } from 'reactflow';
 
@@ -85,12 +85,9 @@ export const uiWorkflow2StoreWorkflow = ({
       !nodeInputIsReference(selectedToolsInput) &&
       Array.isArray(selectedToolsInput.value)
     ) {
-      const serializedTools: any[] = [];
-      for (const tool of selectedToolsInput.value as any[]) {
-        const parsed = SelectedToolItemTypeSchema.safeParse(tool);
-        if (parsed.success) serializedTools.push(serializeAgentTool({ tool: parsed.data }));
-      }
-      selectedToolsInput.value = serializedTools as any;
+      selectedToolsInput.value = selectedToolsInput.value.map((tool: SelectedToolItemType) =>
+        serializeAgentTool({ tool })
+      );
     }
 
     return {

@@ -1635,6 +1635,7 @@ describe('rewriteAppWorkflowToDetail - agent skills', () => {
       nodes[0].inputs.find((input) => input.key === NodeInputKeyEnum.selectedTools)?.value
     ).toMatchObject([
       {
+        configStatus: 'noConfig',
         inputs: [
           {
             key: 'query',

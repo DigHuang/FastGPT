@@ -25,7 +25,7 @@ import { useModelDetail } from '@/web/core/ai/model/useModelDetail';
 import { TTSTypeEnum } from '@/web/core/app/constants';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { SmallAddIcon } from '@chakra-ui/icons';
-import { AGENT_SANDBOX_TOOLSET_ID, SANDBOX_ICON } from '@fastgpt/global/core/ai/sandbox/tools';
+import { SANDBOX_ICON } from '@fastgpt/global/core/ai/sandbox/tools';
 import { getToolIdentityKey } from '@fastgpt/global/core/app/tool/utils';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
@@ -138,6 +138,7 @@ const EditForm = ({
       });
     },
     onAddAgentSkill,
+    onEnableSandbox: () => onChangeAgentSandbox(true),
     canUploadFile: !!(
       appForm.chatConfig.fileSelectConfig?.canSelectFile ||
       appForm.chatConfig.fileSelectConfig?.canSelectImg ||
@@ -174,30 +175,6 @@ const EditForm = ({
     modelType: ModelTypeEnum.llm
   });
   const selectedModel = configuredModel;
-  const promptSkillOption = useMemo(
-    () => ({
-      ...skillOption,
-      onSelect: async (id: string) => {
-        const option = await skillOption.onSelect?.(id);
-        if (!option?.onClick) return option;
-
-        return {
-          ...option,
-          onClick: async (toolId: string) => {
-            const result = await option.onClick?.(toolId);
-
-            // AgentV2 提示词 @虚拟机 时，同步打开下方虚拟机开关。
-            if (result?.id === AGENT_SANDBOX_TOOLSET_ID && !appForm.aiSettings.useAgentSandbox) {
-              onChangeAgentSandbox(true);
-            }
-
-            return result;
-          }
-        };
-      }
-    }),
-    [appForm.aiSettings.useAgentSandbox, onChangeAgentSandbox, skillOption]
-  );
   const tokenLimit = useMemo(() => {
     return getModelQuoteTokenLimit(configuredModel);
   }, [configuredModel]);
@@ -301,7 +278,7 @@ const EditForm = ({
                 isRichText={true}
                 placeholder={t('workflow:agent.prompt_placeholder')}
                 variableLabels={formatVariables}
-                skillOption={promptSkillOption}
+                skillOption={skillOption}
                 selectedSkills={selectedSkills}
                 onClickSkill={onClickSkill}
                 onRemoveSkill={onRemoveSkill}

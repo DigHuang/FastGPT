@@ -18,7 +18,7 @@ import { resolvePluginDataErrorIssueCode } from './error';
 
 /** 校验工作流节点中的虚拟机（Sandbox）与技能可用性约束，与 Agent V2 (checkAppFormSandboxIssues) 保持一致。 */
 export const findWorkflowSandboxIssueNode = <
-  T extends { data: Pick<FlowNodeItemType, 'flowNodeType' | 'inputs' | 'isFolded'> }
+  T extends { data: Pick<FlowNodeItemType, 'flowNodeType' | 'inputs'> }
 >({
   nodes,
   showSandbox,
@@ -31,13 +31,17 @@ export const findWorkflowSandboxIssueNode = <
   t: TFunction;
 }): { node: T; message: string } | undefined => {
   for (const node of nodes) {
-    if (node.data.isFolded) continue;
+    const { flowNodeType, inputs } = node.data;
+    if (flowNodeType !== FlowNodeTypeEnum.agent && flowNodeType !== FlowNodeTypeEnum.toolCall) {
+      continue;
+    }
 
-    if (node.data.flowNodeType === FlowNodeTypeEnum.agent) {
-      const skills = node.data.inputs.find((input) => input.key === NodeInputKeyEnum.skills)?.value;
-      const useAgentSandbox = Boolean(
-        node.data.inputs.find((input) => input.key === NodeInputKeyEnum.useAgentSandbox)?.value
-      );
+    const useAgentSandbox = Boolean(
+      inputs.find((input) => input.key === NodeInputKeyEnum.useAgentSandbox)?.value
+    );
+
+    if (flowNodeType === FlowNodeTypeEnum.agent) {
+      const skills = inputs.find((input) => input.key === NodeInputKeyEnum.skills)?.value;
       if (
         Array.isArray(skills) &&
         skills.length > 0 &&
@@ -50,21 +54,13 @@ export const findWorkflowSandboxIssueNode = <
       }
     }
 
-    if (
-      node.data.flowNodeType === FlowNodeTypeEnum.agent ||
-      node.data.flowNodeType === FlowNodeTypeEnum.toolCall
-    ) {
-      const useAgentSandbox = Boolean(
-        node.data.inputs.find((input) => input.key === NodeInputKeyEnum.useAgentSandbox)?.value
-      );
-      if (useAgentSandbox && (!showSandbox || !enableSandbox)) {
-        return {
-          node,
-          message: !showSandbox
-            ? t('skill:sandbox_system_not_configured_toast')
-            : t('app:sandbox_free_not_support')
-        };
-      }
+    if (useAgentSandbox && (!showSandbox || !enableSandbox)) {
+      return {
+        node,
+        message: !showSandbox
+          ? t('skill:sandbox_system_not_configured_toast')
+          : t('app:sandbox_free_not_support')
+      };
     }
   }
 
@@ -153,12 +149,13 @@ export const checkWorkflowNodeResourceRules = ({
       selectedTools.some((tool) => {
         if (!tool || typeof tool !== 'object') return false;
         const status = tool.status ?? tool.pluginData?.status;
-        if (status === PluginStatusEnum.Offline) return true;
-        if (tool.pluginData?.error || tool.error) return true;
+        if (status === PluginStatusEnum.Offline || tool.pluginData?.error) return true;
         if (tool.configStatus === 'invalid' || tool.configStatus === 'waitingForConfig') {
           return true;
         }
-        return Array.isArray(tool.inputs) && getToolConfigStatus({ tool }).status !== 'configured';
+        if (!Array.isArray(tool.inputs)) return false;
+        const { status: configStatus } = getToolConfigStatus({ tool });
+        return configStatus === 'invalid' || configStatus === 'waitingForConfig';
       })
     ) {
       issues.push({

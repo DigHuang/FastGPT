@@ -7,6 +7,7 @@ import type { StoreNodeItemType } from '@fastgpt/global/core/workflow/type/node'
 import { nodeInputIsReference } from '@fastgpt/global/common/workflow/reference';
 import { projectExternalVariableInput } from '@fastgpt/global/common/workflow/input';
 import {
+  getToolConfigStatus,
   initAgentToolInputType,
   normalizeFlowNodeInputType
 } from '@fastgpt/global/core/app/formEdit/utils';
@@ -535,7 +536,7 @@ export async function rewriteAppWorkflowToDetail({
                 const { metadataLocale: previewLocale, ...toolData } = data;
                 void previewLocale;
 
-                return {
+                const mergedTool = {
                   ...toolData,
                   ...(tool.metadataLocale !== undefined
                     ? { metadataLocale: tool.metadataLocale }
@@ -549,10 +550,18 @@ export async function rewriteAppWorkflowToDetail({
                       : (tool.toolConfig ?? data.toolConfig),
                   inputs: mergedInputs
                 };
+
+                return {
+                  ...mergedTool,
+                  configStatus: getToolConfigStatus({ tool: mergedTool }).status
+                };
               } else {
                 return {
                   id: tool.id,
                   pluginId: tool.id,
+                  ...(tool.metadataLocale !== undefined
+                    ? { metadataLocale: tool.metadataLocale }
+                    : {}),
                   source: tool.source,
                   version: tool.version ?? '',
                   toolConfig: tool.toolConfig,

@@ -132,6 +132,7 @@ export const useSkillManager = ({
   selectedAgentSkills = [],
   onUpdateOrAddTool,
   onAddAgentSkill,
+  onEnableSandbox,
   canUploadFile,
   hasSelectedDataset,
   useAgentSandbox,
@@ -142,6 +143,7 @@ export const useSkillManager = ({
   onDeleteTool: (id: string, source?: string) => void;
   onUpdateOrAddTool: (tool: SelectedToolItemType) => void;
   onAddAgentSkill?: (skill: SelectedAgentSkillItemType) => boolean;
+  onEnableSandbox?: () => void;
   canUploadFile: boolean;
   hasSelectedDataset: boolean;
   useAgentSandbox: boolean;
@@ -318,6 +320,7 @@ export const useSkillManager = ({
 
   const lastSelectedTools = useLatest(selectedTools);
   const lastSelectedAgentSkills = useLatest(selectedAgentSkills);
+  const lastOnEnableSandbox = useLatest(onEnableSandbox);
   const onAddSkill = useCallback(
     async (skillId: string): Promise<SkillClickResult | undefined> => {
       const existsSkill = lastSelectedAgentSkills.current?.find((item) => item.skillId === skillId);
@@ -375,6 +378,11 @@ export const useSkillManager = ({
         const subToolInfo = systemSubInfo[toolId as keyof typeof systemSubInfo];
 
         if (!subToolInfo) return;
+
+        // 提示词 @虚拟机 时，同步尝试打开虚拟机开关。
+        if (toolId === AGENT_SANDBOX_TOOLSET_ID && !useAgentSandbox) {
+          lastOnEnableSandbox.current?.();
+        }
 
         const configStatus: SkillLabelItemType['configStatus'] = (() => {
           if (toolId === SubAppIds.datasetSearch) {
@@ -452,6 +460,7 @@ export const useSkillManager = ({
       canUploadFile,
       hasSelectedDataset,
       i18n.language,
+      lastOnEnableSandbox,
       lastSelectedTools,
       onUpdateOrAddTool,
       t,
@@ -718,7 +727,7 @@ export const useSkillManager = ({
             onAddTool={(tool) =>
               onUpdateOrAddTool({
                 ...tool,
-                configStatus: 'configured'
+                configStatus: tool.configStatus ?? getToolConfigStatus({ tool }).status
               })
             }
           />
