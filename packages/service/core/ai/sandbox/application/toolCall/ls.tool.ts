@@ -14,12 +14,13 @@ export const SandboxLsToolSchema = z.object({
 export const sandboxLsTool = defineTool({
   zodSchema: SandboxLsToolSchema,
   execute: async ({ sandboxInstance, params }) => {
-    await sandboxInstance.ensureAvailable();
     const limit = params.limit ?? DEFAULT_LS_LIMIT;
+    // 允许列出内置 Skill 等只读运行目录。
     const providerPath = sandboxInstance.resolveRuntimePath(params.path, {
-      allowAbsolutePath: true
+      allowAbsolutePath: true,
+      allowOutsideWorkspace: true
     });
-    const entries = await sandboxInstance.provider.listDirectory(providerPath);
+    const entries = await sandboxInstance.opensandbox.listDirectory(providerPath);
     const results = entries
       .map((entry) => `${entry.name}${entry.isDirectory ? '/' : ''}`)
       .sort((a, b) => a.localeCompare(b));

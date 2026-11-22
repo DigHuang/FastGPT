@@ -19,6 +19,7 @@ export const SandboxFindToolSchema = z.object({
 
 export const sandboxFindTool = defineTool({
   zodSchema: SandboxFindToolSchema,
+  skipEnsureAvailable: true,
   execute: async ({ sandboxInstance, params }) => {
     const limit = params.limit ?? DEFAULT_FIND_LIMIT;
     const searchPath = params.path ?? '.';
