@@ -3913,10 +3913,6 @@
       "zh": "Agent loop 内部 ask_agent 调用记录，用于恢复用户追问上下文和后续 UI 展示",
       "en": "Internal `ask_agent` call record in the Agent loop for follow-up context recovery and UI display"
     },
-    "b660523e17db0bc127495d97b9fdce7ae541bbabc54ebb3d515ddba0cbbda764": {
-      "zh": ": 1. 阶段：checkExisting\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"checkExisting\"}\n\n: 2. 阶段：connecting\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"connecting\",\"isWarmStart\":true}\n\n: 3. 阶段：fetchSkills\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"fetchSkills\"}\n\n: 4. 阶段：creatingContainer\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"creatingContainer\"}\n\n: 5. 阶段：deployingSkills\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"deployingSkills\",\"skillName\":\"资料检索\"}\n\n: 6. 阶段：downloadingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"downloadingPackage\",\"skillName\":\"资料检索\"}\n\n: 7. 阶段：uploadingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"uploadingPackage\",\"skillName\":\"资料检索\"}\n\n: 8. 阶段：extractingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"extractingPackage\",\"skillName\":\"资料检索\"}\n\n: 9. 阶段：lazyInit\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"lazyInit\"}\n\n: 10. 阶段：upgrading\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"upgrading\"}\n\n: 11. 阶段：ready\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"ready\",\"isWarmStart\":true}\n\n: 12. 阶段：failed\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"failed\",\"message\":\"沙箱初始化失败，请稍后重试。\"}\n\n",
-      "en": ": 1. Phase: checkExisting\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"checkExisting\"}\n\n: 2. Phase: connecting\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"connecting\",\"isWarmStart\":true}\n\n: 3. Phase: fetchSkills\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"fetchSkills\"}\n\n: 4. Phase: creatingContainer\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"creatingContainer\"}\n\n: 5. Phase: deployingSkills\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"deployingSkills\",\"skillName\":\"Reference Lookup\"}\n\n: 6. Phase: downloadingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"downloadingPackage\",\"skillName\":\"Reference Lookup\"}\n\n: 7. Phase: uploadingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"uploadingPackage\",\"skillName\":\"Reference Lookup\"}\n\n: 8. Phase: extractingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"extractingPackage\",\"skillName\":\"Reference Lookup\"}\n\n: 9. Phase: lazyInit\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"lazyInit\"}\n\n: 10. Phase: upgrading\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"upgrading\"}\n\n: 11. Phase: ready\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"ready\",\"isWarmStart\":true}\n\n: 12. Phase: failed\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"failed\",\"message\":\"Sandbox initialization failed. Please retry shortly.\"}\n\n"
-    },
     "b6a0d8e5997dcace19fde04e3f41bd77ebae1ff6371bbb1307eba67abdb05503": {
       "zh": "输出 Token 消耗",
       "en": "Output tokens consumed"
@@ -4012,6 +4008,10 @@
     "be162ec87d656f11262f90297801b39257aa61f2d57df73af3a4045424b5e8eb": {
       "zh": "用户数据时间跨度",
       "en": "User analytics timespan"
+    },
+    "becc2801c52d86cc93fdb4eb865e10e19bd909d955bcaa62093af44ce217d435": {
+      "zh": ": 1. 阶段：creatingContainer\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"creatingContainer\"}\n\n: 2. 阶段：downloadingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"downloadingPackage\"}\n\n: 3. 阶段：extractingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"extractingPackage\"}\n\n: 4. 阶段：lazyInit\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"lazyInit\"}\n\n: 5. 阶段：upgrading\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"upgrading\"}\n\n: 6. 阶段：ready\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"ready\"}\n\n: 7. 阶段：failed\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"failed\",\"message\":\"沙箱初始化失败，请稍后重试。\"}\n\n",
+      "en": ": 1. Phase: creatingContainer\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"creatingContainer\"}\n\n: 2. Phase: downloadingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"downloadingPackage\"}\n\n: 3. Phase: extractingPackage\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"extractingPackage\"}\n\n: 4. Phase: lazyInit\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"lazyInit\"}\n\n: 5. Phase: upgrading\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"upgrading\"}\n\n: 6. Phase: ready\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"ready\"}\n\n: 7. Phase: failed\nevent: sandboxStatus\ndata: {\"sandboxId\":\"sandbox-1\",\"phase\":\"failed\",\"message\":\"Sandbox initialization failed. Please retry shortly.\"}\n\n"
     },
     "bf2d436ed1036eb0f24e2d16328b7d71d87d5a404c61b59d951d33902f0258f9": {
       "zh": "API Key 代理调用身份。仅开启 authProxy 的个人密钥可用；按团队成员 ID 或用户名指定，二者同时传入时优先使用 tmbId，解析时过滤 username；tmbId 无效时不回退到用户名",
@@ -4813,10 +4813,6 @@
       "zh": "图片 ID",
       "en": "Image ID"
     },
-    "f07231b3a977347ce5d9e90c3ed4619e4193387abef0c1543c07e58939967ed1": {
-      "zh": "展示各个可见 phase；ready 表示可执行工具，failed 可携带 message，技能部署阶段可携带 skillName。这些是可选分支，并非固定执行顺序。",
-      "en": "Shows visible sandbox lifecycle phases (`ready` allows tool execution, `failed` may carry `message`, skill deployment phases may include `skillName`). Phases represent distinct states rather than a fixed sequence."
-    },
     "f088756998e94b6d9f83a0df149cae7c2956fb9cc42af2c68b757c3bf8e7dffc": {
       "zh": "块索引",
       "en": "Chunk index"
@@ -4872,6 +4868,10 @@
     "f31e4dbd527d044a1132d1ae3d4bee3c4b4b54688f499c12222441c38bb4db94": {
       "zh": "用户好评反馈内容",
       "en": "Positive user feedback text"
+    },
+    "f36eacdb95d7d1bfc2b84e0119316d2cc82a2bd0f65b7bd2ded23852a7d04425": {
+      "zh": "展示各个可见 phase；ready 表示可执行工具，failed 可携带 message。这些是可选分支，并非固定执行顺序。",
+      "en": "Shows visible sandbox lifecycle phases (`ready` allows tool execution, `failed` may carry `message`). Phases represent distinct states rather than a fixed sequence."
     },
     "f3869a44d84f6b5f5713d7b022c976ddeaa5a491ee5bee005a834d9b8a8267f0": {
       "zh": "数值变量最大值",

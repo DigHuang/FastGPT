@@ -16,7 +16,10 @@ import {
   shouldReplaceResumeAiValue,
   shouldResetResumeAiPlaceholder
 } from '@/components/core/chat/ChatContainer/ChatBox/utils/resume';
-import { shouldShowChatItemInlineError } from '@/components/core/chat/ChatContainer/ChatBox/utils/error';
+import {
+  resolveChatItemInlineError,
+  shouldShowChatItemInlineError
+} from '@/components/core/chat/ChatContainer/ChatBox/utils/error';
 import {
   ChatInputDefaultHeight,
   getChatInputContainerHeight,
@@ -130,6 +133,52 @@ describe('shouldShowChatItemInlineError', () => {
         isLastChild: true
       })
     ).toBe(false);
+  });
+});
+
+describe('resolveChatItemInlineError', () => {
+  const translate = (key: string) => key;
+
+  it('prefers responseData-derived errorText and its moduleName over errorMsg', () => {
+    expect(
+      resolveChatItemInlineError({
+        errorMsg: 'Fallback message',
+        errorText: {
+          moduleName: 'Agent',
+          errorText: 'Sandbox error: runtime failed'
+        },
+        fallbackModuleName: 'Sandbox creation failed',
+        errorPrefix: 'Error',
+        translate
+      })
+    ).toEqual({
+      title: 'Error - Agent',
+      message: 'Sandbox error: runtime failed'
+    });
+  });
+
+  it('falls back to errorMsg and fallbackModuleName when errorText is absent', () => {
+    expect(
+      resolveChatItemInlineError({
+        errorMsg: 'Sandbox error: runtime failed',
+        fallbackModuleName: 'Sandbox creation failed',
+        errorPrefix: 'Error',
+        translate
+      })
+    ).toEqual({
+      title: 'Error - Sandbox creation failed',
+      message: 'Sandbox error: runtime failed'
+    });
+  });
+
+  it('returns undefined when neither errorMsg nor errorText exists', () => {
+    expect(
+      resolveChatItemInlineError({
+        fallbackModuleName: 'Agent',
+        errorPrefix: 'Error',
+        translate
+      })
+    ).toBeUndefined();
   });
 });
 

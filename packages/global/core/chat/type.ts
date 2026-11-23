@@ -67,32 +67,21 @@ export type ToolModuleResponseItemType = z.infer<typeof ToolModuleResponseItemSc
 
 /* Sandbox lifecycle phase */
 export type SandboxStatusPhase =
-  // Lifecycle phases
-  | 'checkExisting' // checking for existing container in MongoDB
-  | 'connecting' // warm-start: reusing existing container
-  | 'fetchSkills' // cold-start: fetching skill metadata from DB
-  | 'creatingContainer' // cold-start: creating container, waiting ready (up to 60s)
-  // Skill deployment phases (used in both session-runtime and edit-debug)
-  | 'deployingSkills' // announcing which skill is about to be deployed
-  | 'downloadingPackage' // downloading skill package from MinIO
-  | 'uploadingPackage' // uploading package into sandbox container
-  | 'extractingPackage' // extracting package in sandbox
-  // Lazy-init phases
-  | 'lazyInit' // LLM first calls sandbox tool, triggers container creation
-  // App runtime silent upgrade phase
-  | 'upgrading'
+  // Skill Edit runtime init phases
+  | 'creatingContainer' // creating or activating sandbox container
+  | 'downloadingPackage' // downloading skill package from storage
+  | 'extractingPackage' // extracting skill package into sandbox
+  // Workflow sandbox preparation phases
+  | 'lazyInit' // preparing virtual machine on demand
+  | 'upgrading' // upgrading virtual machine image on the same PVC
   // Terminal phases
   | 'ready' // sandbox is ready
   | 'failed'; // initialization failed
-// Note: 'expiredDetected' and 'restarting' are internal and filtered server-side
 
 export type SandboxStatusItemType = {
   sandboxId: string; // FastGPT sandbox key; ready events use the persisted sandbox instance key
   phase: SandboxStatusPhase;
-  isWarmStart?: boolean; // present on 'connecting' and 'ready'
-  skillName?: string; // present on 'deployingSkills', 'downloadingPackage',
-  // 'uploadingPackage', 'extractingPackage' in session-runtime
-  message?: string; // optional human-readable message
+  message?: string; // optional human-readable message (e.g. failure detail)
 };
 
 /* Skill module response */

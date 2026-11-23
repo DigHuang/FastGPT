@@ -840,4 +840,111 @@ describe('opensandbox client and lifecycle helpers', () => {
 
     await disconnectSandbox(client);
   });
+
+  it('waits through Pending and Allocated transitional states until Running', async () => {
+    mocks.managerListSandboxInfos.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'remote-pending',
+          metadata: { app: 'fastgpt', sessionId: 'sb-pending' },
+          status: { state: 'Pending', message: 'Sandbox is being created' },
+          createdAt: '2026-01-01T00:00:00.000Z'
+        }
+      ],
+      pagination: { hasNextPage: false }
+    });
+    mocks.managerGetSandboxInfo
+      .mockResolvedValueOnce({
+        id: 'remote-pending',
+        metadata: { app: 'fastgpt', sessionId: 'sb-pending' },
+        status: { state: 'Allocated', message: 'Pod has IP assigned' },
+        createdAt: new Date('2026-01-01T00:00:00.000Z')
+      })
+      .mockResolvedValueOnce({
+        id: 'remote-pending',
+        metadata: { app: 'fastgpt', sessionId: 'sb-pending' },
+        status: { state: 'Running', message: 'Sandbox is running' },
+        createdAt: new Date('2026-01-01T00:00:00.000Z')
+      });
+    const sdkSandbox = createSdkSandbox('remote-pending', {
+      app: 'fastgpt',
+      sessionId: 'sb-pending'
+    });
+    mocks.sandboxConnect.mockResolvedValueOnce(sdkSandbox);
+
+    const client = createRuntimeOpenSandboxClient({ sandboxId: 'sb-pending' });
+    await client.ensureRunning();
+
+    expect(client.id).toBe('remote-pending');
+    expect(mocks.managerGetSandboxInfo).toHaveBeenCalledTimes(2);
+    expect(mocks.sandboxCreate).not.toHaveBeenCalled();
+    await disconnectSandbox(client);
+  });
+
+  it('fails fast when waiting for Running hits Failed state, but keeps polling when deleting Terminated/Failed containers', async () => {
+    // 1. 等待 Running 时进入 Failed 仍立即抛 ConnectionError。
+    mocks.managerListSandboxInfos.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'remote-wait-fail',
+          metadata: { app: 'fastgpt', sessionId: 'sb-wait-fail' },
+          status: { state: 'Pending', message: 'Sandbox is being created' },
+          createdAt: '2026-01-01T00:00:00.000Z'
+        }
+      ],
+      pagination: { hasNextPage: false }
+    });
+    mocks.managerGetSandboxInfo.mockResolvedValueOnce({
+      id: 'remote-wait-fail',
+      metadata: { app: 'fastgpt', sessionId: 'sb-wait-fail' },
+      status: { state: 'Failed', message: 'ContainerFailed' },
+      createdAt: new Date('2026-01-01T00:00:00.000Z')
+    });
+
+    const waitFailClient = createRuntimeOpenSandboxClient({ sandboxId: 'sb-wait-fail' });
+    await expect(waitFailClient.ensureRunning()).rejects.toThrow(
+      'Sandbox remote-wait-fail entered an error state: ContainerFailed'
+    );
+
+    // 2. 删除已处于 Failed/Terminated 的绑定容器时，轮询等待 UnExist（404）不应被 Error 态中断。
+    const sdkSandbox = createSdkSandbox('remote-del-failed', {
+      app: 'fastgpt',
+      sessionId: 'sb-del-failed'
+    });
+    sdkSandbox.getInfo
+      .mockResolvedValueOnce({
+        id: 'remote-del-failed',
+        image: { uri: 'fastgpt/sandbox:latest' },
+        entrypoint: ['/usr/local/bin/entrypoint.sh'],
+        metadata: { app: 'fastgpt', sessionId: 'sb-del-failed' },
+        status: { state: 'Failed', message: 'Pod failed' },
+        createdAt: new Date('2026-01-01T00:00:00.000Z')
+      })
+      .mockResolvedValueOnce({
+        id: 'remote-del-failed',
+        image: { uri: 'fastgpt/sandbox:latest' },
+        entrypoint: ['/usr/local/bin/entrypoint.sh'],
+        metadata: { app: 'fastgpt', sessionId: 'sb-del-failed' },
+        status: { state: 'Terminated', message: 'Sandbox expired' },
+        createdAt: new Date('2026-01-01T00:00:00.000Z')
+      })
+      .mockRejectedValueOnce(
+        new mocks.MockSandboxApiException({ message: 'not found', statusCode: 404 })
+      );
+    mocks.sandboxConnect.mockResolvedValueOnce(sdkSandbox);
+    mocks.managerListSandboxInfos.mockResolvedValueOnce({
+      items: [],
+      pagination: { hasNextPage: false }
+    });
+
+    const delClient = await connectToOpenSandbox({
+      sandboxId: 'sb-del-failed',
+      remoteSandboxId: 'remote-del-failed'
+    });
+    await delClient.delete();
+
+    expect(sdkSandbox.kill).toHaveBeenCalledTimes(1);
+    expect(sdkSandbox.getInfo).toHaveBeenCalledTimes(3);
+    expect(delClient.id).toBeUndefined();
+  });
 });

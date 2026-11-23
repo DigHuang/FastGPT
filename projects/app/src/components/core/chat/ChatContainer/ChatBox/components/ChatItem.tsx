@@ -24,7 +24,7 @@ import type { ChatBoxInputType } from '../type';
 import { shouldFilterAiValue } from './AIChatBubble/utils';
 import { getAIChatDisplayGroups } from '../utils/agentAsk';
 import ChatErrorCard from './ChatErrorCard';
-import { shouldShowChatItemInlineError } from '../utils/error';
+import { resolveChatItemInlineError, shouldShowChatItemInlineError } from '../utils/error';
 import { toChatAuthApiTarget } from '@/web/core/chat/utils';
 import { ChatBoxContentMaxWidth } from '../constants';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
@@ -106,15 +106,14 @@ const ChatItem = (props: Props) => {
   }, [statisticalChatItem.totalQuoteList]);
   const { errorText } = statisticalChatItem;
   const inlineErrorInfo = useMemo(() => {
-    if (!chat.errorMsg && !errorText) return;
-
-    const moduleName = errorText?.moduleName || chat.moduleName;
-    const errorPrefix = t('chat:log.error.error_prefix');
-
-    return {
-      title: moduleName ? `${errorPrefix} - ${t(moduleName)}` : errorPrefix,
-      message: t(errorText?.errorText || chat.errorMsg || 'Unknow error')
-    };
+    const translate = t as (key: string, options?: Record<string, unknown>) => string;
+    return resolveChatItemInlineError({
+      errorMsg: chat.errorMsg,
+      errorText,
+      fallbackModuleName: chat.moduleName,
+      errorPrefix: t('chat:log.error.error_prefix'),
+      translate
+    });
   }, [chat.errorMsg, chat.moduleName, errorText, t]);
   const showInlineError = shouldShowChatItemInlineError({
     hasInlineError: !!inlineErrorInfo,
@@ -308,6 +307,7 @@ const ChatItem = (props: Props) => {
               isLastChild={isLastChild && i === displayGroups.length - 1}
               isLastValueGroup={i === lastAiGroupIndex}
               isChatting={isChatting}
+              hasError={!!inlineErrorInfo}
               hasValidContent={hasValidAiContent}
               loadingText={showRunningStatus ? statusBoxData?.name : undefined}
               questionGuides={questionGuides}

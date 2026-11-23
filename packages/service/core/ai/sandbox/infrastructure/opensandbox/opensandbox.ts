@@ -311,7 +311,8 @@ export class OpenSandboxClient {
       const status = this.mapStatus(info.status);
       state = status.state;
       if (expected.includes(state)) return info;
-      if (state === 'Error') {
+      // 仅在等待非删除终态时遇到 Error 才快速失败；等待 UnExist 时部分 provider（如 fast_sandbox / agent_sandbox）在删除期间仍返回 Failed/Terminated，需继续轮询至 404。
+      if (state === 'Error' && !expected.includes('UnExist')) {
         throw new ConnectionError(
           `Sandbox ${sandboxId} entered an error state: ${status.message ?? 'unknown error'}`,
           { endpoint: this.connectionConfig.baseUrl }

@@ -27,6 +27,7 @@ import type {
 } from '@/components/core/chat/ChatContainer/ChatBox/type';
 import { clearChatInputDrafts, readChatInputDraft } from '@/web/core/chat/inputDraft/storage';
 import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import type { WorkflowInteractiveResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
 import type { UserChatSelectType } from '@fastgpt/global/core/chat/input/type';
 import { AuxiliaryGenerationEventEnum } from '@fastgpt/global/core/ai/auxiliaryGeneration/constants';
@@ -1198,5 +1199,46 @@ describe('useChatGenerate.sendPrompt', () => {
       status: 'finish',
       errorMsg: MODERATION_BLOCKED_ERROR_MESSAGE
     });
+  });
+
+  it('keeps sandboxStatus failed label concise without duplicating error message into moduleName', async () => {
+    mocks.start.mockImplementationOnce(async ({ generatingMessage }) => {
+      generatingMessage({
+        event: SseResponseEventEnum.sandboxStatus,
+        sandboxStatus: {
+          sandboxId: 'sb-1',
+          phase: 'failed',
+          message: 'Sandbox error: runtime failed'
+        }
+      });
+      generatingMessage({
+        event: SseResponseEventEnum.flowNodeResponse,
+        nodeResponse: {
+          id: 'agent-1',
+          nodeId: 'agent-node',
+          moduleName: 'Agent',
+          moduleType: FlowNodeTypeEnum.agent,
+          errorText: 'Sandbox error: runtime failed'
+        }
+      });
+      return { responseText: '' };
+    });
+
+    await render();
+    await send({ text: 'run task' });
+
+    expect(records).toHaveLength(2);
+    expect(records[1]).toMatchObject({
+      status: 'finish',
+      moduleName: 'chat:sandbox_status_failed'
+    });
+    expect(records[1].errorMsg).toBeUndefined();
+    expect(records[1].responseData).toEqual([
+      expect.objectContaining({
+        id: 'agent-1',
+        moduleName: 'Agent',
+        errorText: 'Sandbox error: runtime failed'
+      })
+    ]);
   });
 });

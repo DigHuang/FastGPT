@@ -550,8 +550,11 @@ describe('dispatchRunTools', () => {
     expect(runToolCallMock).not.toHaveBeenCalled();
     expect(
       props.workflowStreamResponse.mock.calls.map(
-        ([event]: [{ data: { phase: string } }]) => event.data.phase
+        ([event]: [{ data: { phase: string; message?: string } }]) => event.data
       )
-    ).toEqual(['lazyInit']);
+    ).toEqual([
+      expect.objectContaining({ phase: 'lazyInit' }),
+      expect.objectContaining({ phase: 'failed', message: 'archive upload failed' })
+    ]);
   });
 });

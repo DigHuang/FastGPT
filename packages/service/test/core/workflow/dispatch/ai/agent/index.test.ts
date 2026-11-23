@@ -725,10 +725,16 @@ describe('dispatchRunAgent user context', () => {
     expect(runAgentLoopMock).not.toHaveBeenCalled();
     expect(
       props.workflowStreamResponse.mock.calls
-        .map(([event]: [{ event: string; data: { phase?: string } }]) => event)
+        .map(([event]: [{ event: string; data: { phase?: string; message?: string } }]) => event)
         .filter((event: { event: string }) => event.event === 'sandboxStatus')
-        .map((event: { data: { phase: string } }) => event.data.phase)
-    ).toEqual(['lazyInit']);
+        .map((event: { data: { phase: string; message?: string } }) => event.data)
+    ).toEqual([
+      expect.objectContaining({ phase: 'lazyInit' }),
+      expect.objectContaining({
+        phase: 'failed',
+        message: expect.stringContaining('archive upload failed')
+      })
+    ]);
     expect(result.error?.system_error_text).toContain('archive upload failed');
   });
 

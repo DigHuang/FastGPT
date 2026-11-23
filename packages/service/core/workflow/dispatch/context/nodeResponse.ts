@@ -1,5 +1,8 @@
 import type { ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
-import { filterNodeResponseTreeData } from '@fastgpt/global/core/chat/utils';
+import {
+  filterNodeResponseTreeData,
+  isToolExecutionResponse
+} from '@fastgpt/global/core/chat/utils';
 import {
   childrenResponseFields,
   getNodeResponseIdentityKey,
@@ -71,6 +74,7 @@ export type WorkflowNodeResponseOutputLike = {
   hasOutput?: boolean;
   close?: () => Promise<void> | void;
   getFlatNodeResponses?: () => ChatHistoryItemResType[];
+  hasEmittedUncapturedError?: () => boolean;
 };
 
 /** 当前流程的完整响应能力；无输出时也保留独立 summary 和派生能力。 */
@@ -111,6 +115,7 @@ export const createWorkflowEntryNodeResponseSink = (
 ): WorkflowNodeResponseContext & {
   close: () => Promise<void>;
   getFlatNodeResponses: () => ChatHistoryItemResType[];
+  hasEmittedUncapturedError: () => boolean;
 } => {
   const output = (() => {
     if ('output' in props && props.output) return props.output;
@@ -139,7 +144,8 @@ export const createWorkflowEntryNodeResponseSink = (
     close: async () => {
       await output?.close?.();
     },
-    getFlatNodeResponses: () => output?.getFlatNodeResponses?.() ?? []
+    getFlatNodeResponses: () => output?.getFlatNodeResponses?.() ?? [],
+    hasEmittedUncapturedError: () => output?.hasEmittedUncapturedError?.() ?? false
   });
 };
 
@@ -237,6 +243,9 @@ class WorkflowNodeResponseScope implements WorkflowNodeResponseContext {
 class WorkflowNodeResponseOutput implements WorkflowNodeResponseOutputLike {
   readonly hasOutput = true;
   private readonly publishedResponseKeys = new Set<string>();
+  private readonly emittedNodeIds = new Set<string>();
+  private hasEmittedRootError = false;
+  private readonly emittedChildErrorParentIds: string[] = [];
   private readonly writer: WorkflowNodeResponseWriter;
   private readonly apiVersion?: 'v1' | 'v2';
   private readonly responseAllData: boolean;
@@ -305,6 +314,20 @@ class WorkflowNodeResponseOutput implements WorkflowNodeResponseOutputLike {
         });
 
     visibleResponses.forEach((response) => {
+      if (response.id) {
+        this.emittedNodeIds.add(response.id);
+      }
+      if (
+        !response.errorCaptured &&
+        !isToolExecutionResponse(response) &&
+        Boolean(response.error || response.errorText)
+      ) {
+        if (!response.parentId) {
+          this.hasEmittedRootError = true;
+        } else {
+          this.emittedChildErrorParentIds.push(response.parentId);
+        }
+      }
       workflowStreamResponse(workflowSseEvent.flowNodeResponse(response));
     });
 
@@ -317,5 +340,16 @@ class WorkflowNodeResponseOutput implements WorkflowNodeResponseOutputLike {
 
   getFlatNodeResponses(): ChatHistoryItemResType[] {
     return this.writer.getFlatNodeResponses();
+  }
+
+  /**
+   * 按与 `findFailedResponseNode` 相同的根节点与孤儿节点口径，
+   * 判断本轮 V2 实时 `flowNodeResponse` 是否已向客户端透出未捕获失败节点。
+   */
+  hasEmittedUncapturedError(): boolean {
+    return (
+      this.hasEmittedRootError ||
+      this.emittedChildErrorParentIds.some((parentId) => !this.emittedNodeIds.has(parentId))
+    );
   }
 }

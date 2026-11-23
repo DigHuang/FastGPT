@@ -139,7 +139,7 @@ describe.each(['v1', 'v2'] as const)('completion response examples %s', (version
         .flatMap(({ data }) => data.plan.steps.map((step: { status: string }) => step.status))
         .sort()
     ).toEqual([...AgentPlanStepStatusSchema.options].sort());
-    expect(new Set(frames('sandboxStatus').map(({ data }) => data.phase)).size).toBe(12);
+    expect(new Set(frames('sandboxStatus').map(({ data }) => data.phase)).size).toBe(7);
     expect(frames('toolResponse').map(({ data }) => data.tool.response)).toEqual([
       '导演：新海诚',
       null

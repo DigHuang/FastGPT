@@ -996,6 +996,80 @@ describe('pushChatRecords', () => {
       expect(aiItem?.value).toEqual([]);
       expect(aiItem?.errorMsg).toContain('stream failed');
     });
+
+    it('persists uncaught workflowRuntimeSummary.errorText onto AI errorMsg while keeping caught runs clean', async () => {
+      const responseChatItemId = 'prepared-ai-summary-err';
+      const props = createMockProps(
+        {
+          userContent: {
+            dataId: responseChatItemId,
+            obj: ChatRoleEnum.Human,
+            value: [{ text: { content: 'Run sandbox' } }]
+          },
+          aiContent: {
+            dataId: responseChatItemId,
+            obj: ChatRoleEnum.AI,
+            value: []
+          },
+          workflowRuntimeSummary: {
+            responseIds: ['agent-1'],
+            finishedNodeIds: ['agent-1'],
+            errorCount: 1,
+            errorText: 'Sandbox error: runtime failed',
+            hasLoopRunBreak: false,
+            hasToolStop: false,
+            hasNestedEnd: false,
+            citeCollectionIds: [],
+            llmInputTokens: 0,
+            llmOutputTokens: 0,
+            totalPoints: 0
+          }
+        },
+        { appId: testAppId, teamId: testTeamId, tmbId: testTmbId }
+      );
+
+      await MongoChat.create({
+        appId: testAppId,
+        chatId: props.chatId,
+        teamId: testTeamId,
+        tmbId: testTmbId,
+        sourceType: ChatSourceTypeEnum.app,
+        source: props.source,
+        hasBeenRead: false
+      });
+      await MongoChatItem.create([
+        {
+          teamId: testTeamId,
+          tmbId: testTmbId,
+          sourceType: ChatSourceTypeEnum.app,
+          appId: testAppId,
+          chatId: props.chatId,
+          dataId: responseChatItemId,
+          obj: ChatRoleEnum.Human,
+          value: []
+        },
+        {
+          teamId: testTeamId,
+          tmbId: testTmbId,
+          sourceType: ChatSourceTypeEnum.app,
+          appId: testAppId,
+          chatId: props.chatId,
+          dataId: responseChatItemId,
+          obj: ChatRoleEnum.AI,
+          value: []
+        }
+      ]);
+
+      await finalizeChatRound(props);
+
+      const aiItem = await MongoChatItem.findOne({
+        appId: testAppId,
+        chatId: props.chatId,
+        dataId: responseChatItemId,
+        obj: ChatRoleEnum.AI
+      }).lean();
+      expect(aiItem?.errorMsg).toBe('Sandbox error: runtime failed');
+    });
   });
 
   describe('updateInteractiveChat function', () => {
@@ -2205,6 +2279,75 @@ describe('pushChatRecords', () => {
       const aiRecord = records.histories.find((item) => item.obj === ChatRoleEnum.AI);
 
       expect(aiRecord?.responseData?.map((item) => item.id)).toEqual(['existing-root', 'new-root']);
+    });
+
+    it('persists uncaught workflowRuntimeSummary.errorText onto chatItem.errorMsg on interactive resume', async () => {
+      await MongoChat.create({
+        appId: testAppId,
+        chatId: 'interactive-err-chat',
+        teamId: testTeamId,
+        tmbId: testTmbId,
+        sourceType: ChatSourceTypeEnum.app,
+        source: ChatSourceEnum.online
+      });
+      await MongoChatItem.create({
+        chatId: 'interactive-err-chat',
+        teamId: testTeamId,
+        tmbId: testTmbId,
+        sourceType: ChatSourceTypeEnum.app,
+        appId: testAppId,
+        obj: ChatRoleEnum.AI,
+        dataId: 'interactive-err-item',
+        value: [
+          {
+            interactive: {
+              type: 'userSelect',
+              params: { userSelectedVal: undefined, options: ['Continue'] }
+            }
+          }
+        ]
+      });
+
+      const props = createMockProps(
+        {
+          chatId: 'interactive-err-chat',
+          userContent: { obj: ChatRoleEnum.Human, value: [{ text: { content: 'Continue' } }] },
+          aiContent: { obj: ChatRoleEnum.AI, value: [] },
+          workflowRuntimeSummary: {
+            responseIds: ['node-1'],
+            finishedNodeIds: ['node-1'],
+            errorCount: 1,
+            errorText: 'Interactive step failed',
+            hasLoopRunBreak: false,
+            hasToolStop: false,
+            hasNestedEnd: false,
+            citeCollectionIds: [],
+            llmInputTokens: 0,
+            llmOutputTokens: 0,
+            totalPoints: 0
+          }
+        },
+        { appId: testAppId, teamId: testTeamId, tmbId: testTmbId }
+      );
+
+      await updateInteractiveChat({
+        ...props,
+        interactive: {
+          type: 'userSelect',
+          entryNodeIds: [],
+          memoryEdges: [],
+          nodeOutputs: [],
+          params: { description: '', userSelectOptions: [{ key: 'continue', value: 'Continue' }] }
+        }
+      });
+
+      const saved = await MongoChatItem.findOne({
+        appId: testAppId,
+        chatId: 'interactive-err-chat',
+        dataId: 'interactive-err-item',
+        obj: ChatRoleEnum.AI
+      }).lean();
+      expect(saved?.errorMsg).toBe('Interactive step failed');
     });
   });
 });

@@ -122,18 +122,14 @@ const SkillDetailContextProviderInner = ({
 
   const phaseToMessage = useCallback(
     (status: SandboxStatusItemType): string => {
-      const { phase, skillName, message, isWarmStart } = status;
-      const map: Record<string, string> = {
-        checkExisting: t('skill:sandbox_checking'),
-        connecting: t('skill:sandbox_connecting'),
-        fetchSkills: t('skill:sandbox_fetch_skills'),
+      const { phase, message } = status;
+      const map: Record<SandboxStatusPhase, string> = {
         creatingContainer: t('skill:sandbox_creating_container'),
-        deployingSkills: t('skill:sandbox_deploying_skills', { skillName: skillName || '' }),
         downloadingPackage: t('skill:sandbox_downloading'),
-        uploadingPackage: t('skill:sandbox_uploading'),
         extractingPackage: t('skill:sandbox_extracting'),
         lazyInit: t('skill:sandbox_lazy_init'),
-        ready: isWarmStart ? t('skill:sandbox_ready_warm') : t('skill:sandbox_ready'),
+        upgrading: t('skill:sandbox_creating_container'),
+        ready: t('skill:sandbox_ready'),
         failed: t('skill:sandbox_failed', { message: message || '' })
       };
       return map[phase] || message || phase;

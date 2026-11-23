@@ -531,4 +531,98 @@ describe('createWorkflowEntryNodeResponseSink', () => {
       }
     );
   });
+
+  it('tracks whether V2 SSE actually emitted an uncaptured failed node', async () => {
+    const workflowStreamResponse = vi.fn();
+    await runWithTestWorkflowContext(
+      {
+        checkIsStopping: () => false,
+        mcpClientMemory: {},
+        fileContext: await createTestWorkflowFileContext(),
+        workflowStreamResponse
+      },
+      async () => {
+        // 1. responseAllData=false 时，非公开节点（chatNode）被过滤，不应判定已透出错误。
+        const filteredSink = createWorkflowEntryNodeResponseSink({
+          writer: createWriter() as any,
+          apiVersion: 'v2',
+          responseAllData: false,
+          responseDetail: false
+        });
+        await filteredSink.publish([
+          {
+            response: {
+              id: 'chat-fail',
+              nodeId: 'chat-1',
+              moduleName: 'AI Chat',
+              moduleType: FlowNodeTypeEnum.chatNode,
+              errorText: 'Model timeout'
+            } as ChatHistoryItemResType
+          }
+        ]);
+        expect(filteredSink.hasEmittedUncapturedError()).toBe(false);
+
+        // 2. responseAllData=false 时，公开节点（agent）报错会被透出。
+        const publicSink = createWorkflowEntryNodeResponseSink({
+          writer: createWriter() as any,
+          apiVersion: 'v2',
+          responseAllData: false,
+          responseDetail: false
+        });
+        await publicSink.publish([
+          {
+            response: {
+              id: 'agent-fail',
+              nodeId: 'agent-1',
+              moduleName: 'Agent',
+              moduleType: FlowNodeTypeEnum.agent,
+              errorText: 'Sandbox error: failed'
+            } as ChatHistoryItemResType
+          }
+        ]);
+        expect(publicSink.hasEmittedUncapturedError()).toBe(true);
+
+        // 3. 捕获异常（errorCaptured=true）与工具执行失败不应标记为未捕获错误；子错误在父节点发出后被收敛。
+        const capturedSink = createWorkflowEntryNodeResponseSink({
+          writer: createWriter() as any,
+          apiVersion: 'v2',
+          responseAllData: true,
+          responseDetail: true
+        });
+        await capturedSink.publish([
+          {
+            response: {
+              id: 'tool-1',
+              parentId: 'agent-ok',
+              nodeId: 'tool-node',
+              moduleName: 'Bash',
+              moduleType: FlowNodeTypeEnum.tool,
+              errorText: 'command exit 1'
+            } as ChatHistoryItemResType
+          },
+          {
+            response: {
+              id: 'child-1',
+              parentId: 'parent-caught',
+              nodeId: 'child-node',
+              moduleName: 'Child',
+              moduleType: FlowNodeTypeEnum.agent,
+              errorText: 'child failed'
+            } as ChatHistoryItemResType
+          },
+          {
+            response: {
+              id: 'parent-caught',
+              nodeId: 'parent-node',
+              moduleName: 'Parent',
+              moduleType: FlowNodeTypeEnum.runApp,
+              errorText: 'child failed',
+              errorCaptured: true
+            } as ChatHistoryItemResType
+          }
+        ]);
+        expect(capturedSink.hasEmittedUncapturedError()).toBe(false);
+      }
+    );
+  });
 });

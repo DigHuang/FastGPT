@@ -8,7 +8,6 @@ import {
   ChatSourceEnum,
   ChatSourceTypeEnum
 } from '@fastgpt/global/core/chat/constants';
-import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { dispatchWorkFlow } from '@fastgpt/service/core/workflow/dispatch';
 import {
   getWorkflowFileLimits,
@@ -22,7 +21,6 @@ import {
   getLastInteractiveValue,
   rewriteNodeOutputByHistories
 } from '@fastgpt/global/core/workflow/runtime/utils';
-import { workflowSseEvent } from '@fastgpt/global/core/workflow/runtime/sse';
 import { GPTMessages2Chats } from '@fastgpt/global/core/chat/adapt';
 import { getChatItems } from '@fastgpt/service/core/chat/controller';
 import {
@@ -76,6 +74,7 @@ import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 
 import {
   filterWorkflowFinalResponseData,
+  finishWorkflowStreamResponse,
   getWorkflowDatasetCiteRetention,
   getWorkflowFinalResponseData,
   getWorkflowFinalResponseError,
@@ -495,20 +494,14 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       await titleSender.send();
       titleSender.close();
 
-      workflowResponseWrite(workflowSseEvent.answerStop());
-      // 特殊输配(data 不是{})
-      if (detail) {
-        workflowResponseWrite(
-          workflowSseEvent.raw({
-            event: SseResponseEventEnum.flowResponses,
-            data: JSON.stringify(feResponseData)
-          })
-        );
-      }
-
-      workflowResponseWrite(
-        workflowSseEvent.done(detail ? SseResponseEventEnum.answer : undefined)
-      );
+      finishWorkflowStreamResponse({
+        apiVersion: 'v1',
+        detail,
+        finalError,
+        feResponseData,
+        responseWrite: workflowResponseWrite,
+        writeStreamError: streamResponseContext.writeStreamError
+      });
     } else {
       const generatedTitle = await titleSender.send();
       const formatResponseContent = removeAIResponseCite(assistantResponses, jsonRetainDatasetCite);

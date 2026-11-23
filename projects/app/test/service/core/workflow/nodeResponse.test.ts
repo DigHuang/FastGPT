@@ -4,10 +4,12 @@ import {
   ModerationActionEnum,
   ModerationStageEnum
 } from '@fastgpt/global/core/plugin/moderation/constants';
+import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { workflowSseEvent } from '@fastgpt/global/core/workflow/runtime/sse';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import {
   filterWorkflowFinalResponseData,
+  finishWorkflowStreamResponse,
   getWorkflowDatasetCiteRetention,
   getWorkflowFinalResponseError,
   shouldRetainWorkflowNodeResponses
@@ -220,5 +222,109 @@ describe('getWorkflowFinalResponseError', () => {
         ]
       })
     ).toBeUndefined();
+  });
+});
+
+describe('finishWorkflowStreamResponse', () => {
+  it('writes stream error for V2 when finalError was not emitted via flowNodeResponse', () => {
+    const responseWrite = vi.fn();
+    const writeStreamError = vi.fn();
+
+    finishWorkflowStreamResponse({
+      apiVersion: 'v2',
+      detail: true,
+      finalError: 'Sandbox error: unavailable',
+      hasEmittedStreamNodeError: false,
+      responseWrite,
+      writeStreamError
+    });
+
+    expect(responseWrite).toHaveBeenCalledTimes(1);
+    expect(responseWrite.mock.calls[0]?.[0]?.event).toBe(SseResponseEventEnum.answer);
+    expect(writeStreamError).toHaveBeenCalledWith('Sandbox error: unavailable');
+  });
+
+  it('writes stream error for V2 when detail is false even if sink emitted node errors', () => {
+    const responseWrite = vi.fn();
+    const writeStreamError = vi.fn();
+
+    finishWorkflowStreamResponse({
+      apiVersion: 'v2',
+      detail: false,
+      finalError: 'Upstream failed',
+      hasEmittedStreamNodeError: true,
+      responseWrite,
+      writeStreamError
+    });
+
+    expect(writeStreamError).toHaveBeenCalledWith('Upstream failed');
+    expect(responseWrite.mock.calls.some(([payload]) => payload.data === '[DONE]')).toBe(false);
+  });
+
+  it('finishes normally without duplicate stream error when V2 already emitted the failed node', () => {
+    const responseWrite = vi.fn();
+    const writeStreamError = vi.fn();
+
+    finishWorkflowStreamResponse({
+      apiVersion: 'v2',
+      detail: true,
+      finalError: 'Sandbox error: unavailable',
+      hasEmittedStreamNodeError: true,
+      responseWrite,
+      writeStreamError
+    });
+
+    expect(writeStreamError).not.toHaveBeenCalled();
+    expect(responseWrite.mock.calls.at(-1)?.[0]).toEqual({
+      event: SseResponseEventEnum.answer,
+      data: '[DONE]'
+    });
+  });
+
+  it('writes stream error for V1 when detail is true but filtered feResponseData drops the failing node', () => {
+    const responseWrite = vi.fn();
+    const writeStreamError = vi.fn();
+
+    finishWorkflowStreamResponse({
+      apiVersion: 'v1',
+      detail: true,
+      finalError: 'HTTP node failed',
+      feResponseData: [],
+      responseWrite,
+      writeStreamError
+    });
+
+    expect(
+      responseWrite.mock.calls.some(
+        ([payload]) => payload.event === SseResponseEventEnum.flowResponses && payload.data === '[]'
+      )
+    ).toBe(true);
+    expect(writeStreamError).toHaveBeenCalledWith('HTTP node failed');
+  });
+
+  it('finishes normally for V1 when feResponseData already contains the failed node', () => {
+    const responseWrite = vi.fn();
+    const writeStreamError = vi.fn();
+
+    finishWorkflowStreamResponse({
+      apiVersion: 'v1',
+      detail: true,
+      finalError: 'Agent failed',
+      feResponseData: [
+        {
+          id: 'agent-1',
+          moduleType: FlowNodeTypeEnum.agent,
+          errorText: 'Agent failed'
+        }
+      ],
+      responseWrite,
+      writeStreamError
+    });
+
+    expect(writeStreamError).not.toHaveBeenCalled();
+    expect(responseWrite.mock.calls.at(-1)?.[0]).toEqual({
+      event: SseResponseEventEnum.answer,
+      data: '[DONE]'
+    });
   });
 });

@@ -7,7 +7,6 @@ import {
   ChatSourceEnum,
   ChatSourceTypeEnum
 } from '@fastgpt/global/core/chat/constants';
-import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { dispatchWorkFlow } from '@fastgpt/service/core/workflow/dispatch';
 import {
   getWorkflowFileLimits,
@@ -21,7 +20,6 @@ import {
   getLastInteractiveValue,
   rewriteNodeOutputByHistories
 } from '@fastgpt/global/core/workflow/runtime/utils';
-import { workflowSseEvent } from '@fastgpt/global/core/workflow/runtime/sse';
 import { GPTMessages2Chats } from '@fastgpt/global/core/chat/adapt';
 import { getChatItems } from '@fastgpt/service/core/chat/controller';
 import {
@@ -74,6 +72,7 @@ import {
 import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   filterWorkflowFinalResponseData,
+  finishWorkflowStreamResponse,
   getWorkflowDatasetCiteRetention,
   getWorkflowFinalResponseData,
   getWorkflowFinalResponseError,
@@ -380,7 +379,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       system_memories,
       customFeedbacks,
       workflowRuntimeSummary,
-      flatNodeResponses
+      flatNodeResponses,
+      hasEmittedStreamNodeError
     } = await dispatchWorkFlow({
       apiVersion: 'v2',
       res,
@@ -487,6 +487,9 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       workflowRuntimeSummary,
       finalResponseData
     });
+    // 工作流可正常返回错误摘要，JSON/SSE 都可能以 HTTP 200 收尾，需显式标记采集失败。
+    if (finalError) markProfileError(finalError);
+
     const feResponseData = filterWorkflowFinalResponseData({
       responseData: finalResponseData,
       responseAllData,
@@ -498,11 +501,14 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       await titleSender.send();
       titleSender.close();
 
-      streamResponseContext.responseWrite(workflowSseEvent.answerStop());
-
-      streamResponseContext.responseWrite(
-        workflowSseEvent.done(detail ? SseResponseEventEnum.answer : undefined)
-      );
+      finishWorkflowStreamResponse({
+        apiVersion: 'v2',
+        detail,
+        finalError,
+        hasEmittedStreamNodeError,
+        responseWrite: streamResponseContext.responseWrite,
+        writeStreamError: streamResponseContext.writeStreamError
+      });
     } else {
       const generatedTitle = await titleSender.send();
       const formatResponseContent = removeAIResponseCite(assistantResponses, jsonRetainDatasetCite);
@@ -559,8 +565,6 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
         totalPoints
       });
     }
-
-    if (finalError) markProfileError(finalError);
   } catch (err) {
     markProfileError(err);
     const { preparedRound } = roundState;

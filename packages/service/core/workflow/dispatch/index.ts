@@ -313,6 +313,7 @@ export async function dispatchWorkFlow({
 
           return {
             ...result,
+            hasEmittedStreamNodeError: nodeResponseSink.hasEmittedUncapturedError(),
             // 子工作流只消费 summary；完整详情由共享 writer 持久化。
             ...(nodeResponseWriteConfig.retainInMemory
               ? { flatNodeResponses: nodeResponseSink.getFlatNodeResponses() }

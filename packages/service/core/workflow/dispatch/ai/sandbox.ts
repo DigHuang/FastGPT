@@ -1,3 +1,4 @@
+import { getErrText } from '@fastgpt/global/common/error/utils';
 import { ChatSourceTypeEnum } from '@fastgpt/global/core/chat/constants';
 import {
   workflowSseEvent,
@@ -7,9 +8,9 @@ import { getRunningSandboxId } from '../../../ai/sandbox/utils/id';
 import { getWorkflowContext } from '../context';
 import { markChatSandboxEnabled } from '../../../chat/sandbox/service';
 
-export type WorkflowSandboxPhase = 'lazyInit' | 'upgrading' | 'ready';
+export type WorkflowSandboxPhase = 'lazyInit' | 'upgrading' | 'ready' | 'failed';
 
-/** 构造带连续重复状态合并与升级恢复语义的 Workflow Sandbox 状态推送器，供主链与 Pro Builder 共用。 */
+/** 构造带连续重复状态合并、升级恢复与失败上报语义的 Workflow Sandbox 状态推送器，供主链与 Pro Builder 共用。 */
 export function createWorkflowSandboxPhaseReporter({
   sandboxId,
   workflowStreamResponse
@@ -19,10 +20,16 @@ export function createWorkflowSandboxPhaseReporter({
 }) {
   let reportedPhase: WorkflowSandboxPhase | undefined;
 
-  const report = (phase: WorkflowSandboxPhase) => {
+  const report = (phase: WorkflowSandboxPhase, message?: string) => {
     if (reportedPhase === phase) return;
     reportedPhase = phase;
-    workflowStreamResponse?.(workflowSseEvent.sandboxStatus({ sandboxId, phase }));
+    workflowStreamResponse?.(
+      workflowSseEvent.sandboxStatus({
+        sandboxId,
+        phase,
+        ...(message ? { message } : {})
+      })
+    );
   };
 
   return {
@@ -32,16 +39,17 @@ export function createWorkflowSandboxPhaseReporter({
       if (reportedPhase === 'upgrading') {
         report('lazyInit');
       }
-    }
+    },
+    onFailed: (message?: string) => report('failed', message)
   };
 }
 
 /**
- * 编排 Workflow AI 节点的虚拟机准备流程，并推送准备、升级和就绪状态。
+ * 编排 Workflow AI 节点的虚拟机准备流程，并推送准备、升级、就绪和失败状态。
  *
  * 进入即报告 `lazyInit`，并向 `prepareRuntime` 注入 `onUpgrade` 回调在单次 `getSandboxClient`
  * 调用内推送镜像升级状态（升级结束后切回 `lazyInit` 继续准备文件、Skill 与 entrypoint）；
- * 成功后先持久化根会话标记再报告 `ready`，任何阶段失败都向上传递错误，不误报就绪。
+ * 成功后先持久化根会话标记再报告 `ready`；任何阶段失败先报告 `failed` 再向上传递错误，不误报就绪。
  */
 export async function ensureWorkflowSandboxReadyForUse<T>({
   sourceType,
@@ -66,15 +74,20 @@ export async function ensureWorkflowSandboxReadyForUse<T>({
   });
 
   reporter.report('lazyInit');
-  const runtime = await prepareRuntime({
-    onUpgrade: reporter.onUpgrade,
-    onUpgradeComplete: reporter.onUpgradeComplete
-  });
+  try {
+    const runtime = await prepareRuntime({
+      onUpgrade: reporter.onUpgrade,
+      onUpgradeComplete: reporter.onUpgradeComplete
+    });
 
-  // ready 事件会触发独立的文件/ticket 请求，必须先让鉴权读取到根会话的成功标记。
-  if (sourceType === ChatSourceTypeEnum.app) {
-    await markChatSandboxEnabled({ sourceType, sourceId, chatId, teamId });
+    // ready 事件会触发独立的文件/ticket 请求，必须先让鉴权读取到根会话的成功标记。
+    if (sourceType === ChatSourceTypeEnum.app) {
+      await markChatSandboxEnabled({ sourceType, sourceId, chatId, teamId });
+    }
+    reporter.report('ready');
+    return runtime;
+  } catch (error) {
+    reporter.onFailed(getErrText(error));
+    throw error;
   }
-  reporter.report('ready');
-  return runtime;
 }

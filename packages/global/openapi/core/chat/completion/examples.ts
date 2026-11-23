@@ -212,13 +212,8 @@ export const getChatCompletionResponseExamples = (version: CompletionExampleVers
   const userSelectInteractive = userSelect.choices[0].message.content[0].interactive;
   const userInputInteractive = userInput.choices[0].message.content[0].interactive;
   const sandboxPhases = [
-    'checkExisting',
-    'connecting',
-    'fetchSkills',
     'creatingContainer',
-    'deployingSkills',
     'downloadingPackage',
-    'uploadingPackage',
     'extractingPackage',
     'lazyInit',
     'upgrading',
@@ -488,20 +483,13 @@ export const getChatCompletionResponseExamples = (version: CompletionExampleVers
       name: 'sandboxStatus',
       label: '沙箱状态',
       description:
-        '展示各个可见 phase；ready 表示可执行工具，failed 可携带 message，技能部署阶段可携带 skillName。这些是可选分支，并非固定执行顺序。',
-      data: { sandboxId: 'sandbox-1', phase: 'ready', isWarmStart: true },
+        '展示各个可见 phase；ready 表示可执行工具，failed 可携带 message。这些是可选分支，并非固定执行顺序。',
+      data: { sandboxId: 'sandbox-1', phase: 'ready' },
       variants: sandboxPhases.map((phase) => ({
         label: `阶段：${phase}`,
         data: {
           sandboxId: 'sandbox-1',
           phase,
-          ...((phase === 'connecting' || phase === 'ready') && { isWarmStart: true }),
-          ...([
-            'deployingSkills',
-            'downloadingPackage',
-            'uploadingPackage',
-            'extractingPackage'
-          ].includes(phase) && { skillName: '资料检索' }),
           ...(phase === 'failed' && { message: '沙箱初始化失败，请稍后重试。' })
         }
       }))

@@ -5,6 +5,11 @@ import {
   stripModerationRecordsFromNodeResponses
 } from '@fastgpt/global/core/chat/utils';
 import { getChildrenResponses } from '@fastgpt/global/core/chat/utils/mergeNode';
+import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+import {
+  workflowSseEvent,
+  type WorkflowResponseType
+} from '@fastgpt/global/core/workflow/runtime/sse';
 import { composeNodeResponseDetail } from '@fastgpt/service/core/chat/nodeResponseStorage';
 import type {
   WorkflowDebugResponse,
@@ -155,4 +160,61 @@ export const getWorkflowFinalResponseError = ({
 
   const failedNode = findFailedResponseNode(finalResponseData);
   return failedNode?.error || failedNode?.errorText;
+};
+
+/**
+ * 统一收尾 v1/v2 completions 的流式响应与未捕获错误透出。
+ *
+ * - 当客户端已通过 V2 实时 `flowNodeResponse` 或 V1 `flowResponses` 收到未捕获失败节点时，
+ *   维持既有 `answerStop` + `done` 收尾协议，保留前端从节点响应中提取 `moduleName` 的能力；
+ * - 当存在未捕获 `finalError` 但客户端本轮未收到任何失败节点（如 `detail=false`，或
+ *   Share/OutLink 下非 `publicNodeMap` 节点报错）时，在 `answerStop` 后复用统一的
+ *   `writeStreamError` 发送 `event: error`，避免流静默结束导致前端误判“应用无输出内容”。
+ */
+export const finishWorkflowStreamResponse = ({
+  apiVersion,
+  detail,
+  finalError,
+  hasEmittedStreamNodeError = false,
+  feResponseData = [],
+  responseWrite,
+  writeStreamError
+}: {
+  apiVersion: 'v1' | 'v2';
+  detail: boolean;
+  finalError?: unknown;
+  hasEmittedStreamNodeError?: boolean;
+  feResponseData?: ChatHistoryItemResType[];
+  responseWrite: WorkflowResponseType;
+  writeStreamError: (error: unknown) => void;
+}) => {
+  responseWrite(workflowSseEvent.answerStop());
+
+  if (apiVersion === 'v1' && detail) {
+    // V1 兼容：flowResponses 的 data 为 JSON 数组字符串。
+    responseWrite(
+      workflowSseEvent.raw({
+        event: SseResponseEventEnum.flowResponses,
+        data: JSON.stringify(feResponseData)
+      })
+    );
+  }
+
+  const clientReceivedNodeError =
+    detail &&
+    (apiVersion === 'v2'
+      ? hasEmittedStreamNodeError
+      : Boolean(findFailedResponseNode(feResponseData)));
+
+  if (
+    finalError !== undefined &&
+    finalError !== null &&
+    finalError !== '' &&
+    !clientReceivedNodeError
+  ) {
+    writeStreamError(finalError);
+    return;
+  }
+
+  responseWrite(workflowSseEvent.done(detail ? SseResponseEventEnum.answer : undefined));
 };

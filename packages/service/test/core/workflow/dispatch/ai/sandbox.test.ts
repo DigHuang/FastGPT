@@ -109,7 +109,7 @@ describe('ensureWorkflowSandboxReadyForUse', () => {
     ]);
   });
 
-  it('does not report readiness after prepareRuntime fails', async () => {
+  it('reports failed status with error message and skips readiness after prepareRuntime fails', async () => {
     const error = new Error('runtime failed');
     const workflowStreamResponse = vi.fn();
     const prepareRuntime = vi.fn(async () => {
@@ -120,10 +120,27 @@ describe('ensureWorkflowSandboxReadyForUse', () => {
       ensureWorkflowSandboxReadyForUse({ ...source, workflowStreamResponse, prepareRuntime })
     ).rejects.toBe(error);
 
-    expect(workflowStreamResponse.mock.calls.map(([event]) => event.data.phase)).toEqual([
-      'lazyInit'
+    expect(workflowStreamResponse.mock.calls.map(([event]) => event.data)).toEqual([
+      { sandboxId, phase: 'lazyInit' },
+      { sandboxId, phase: 'failed', message: 'runtime failed' }
     ]);
     expect(markChatSandboxEnabledMock).not.toHaveBeenCalled();
+  });
+
+  it('reports failed status when persisting root chat sandbox state fails', async () => {
+    const error = new Error('mark chat failed');
+    const workflowStreamResponse = vi.fn();
+    const prepareRuntime = vi.fn(async () => ({ client: 'prepared' }));
+    markChatSandboxEnabledMock.mockRejectedValueOnce(error);
+
+    await expect(
+      ensureWorkflowSandboxReadyForUse({ ...source, workflowStreamResponse, prepareRuntime })
+    ).rejects.toBe(error);
+
+    expect(workflowStreamResponse.mock.calls.map(([event]) => event.data)).toEqual([
+      { sandboxId, phase: 'lazyInit' },
+      { sandboxId, phase: 'failed', message: 'mark chat failed' }
+    ]);
   });
 
   it('prepares the runtime without a stream callback', async () => {

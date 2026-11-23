@@ -48,7 +48,6 @@ import type { StartChatFnProps, generatingMessageProps } from '../../type';
 import { cloneDeep } from 'lodash-es';
 import type { ResolvedChatAuthTargetInput } from '@/web/core/chat/type';
 import { useChatAuthApiTarget } from '@/web/core/chat/utils';
-import { getChatItemErrorText } from '@/global/core/chat/utils';
 import {
   isChatGeneratingError,
   getChatGeneratingConflictData,
@@ -260,40 +259,20 @@ export const useChatGenerate = ({
           };
         }
         if (event === SseResponseEventEnum.sandboxStatus && sandboxStatus) {
-          const getSandboxPhaseLabel = (): string => {
-            const { phase, isWarmStart, skillName, message } = sandboxStatus;
-            const phaseLabelMap: Record<Exclude<SandboxStatusPhase, 'ready' | 'failed'>, string> = {
-              checkExisting: t('chat:sandbox_status_checkExisting'),
-              connecting: t('chat:sandbox_status_connecting'),
-              fetchSkills: t('chat:sandbox_status_fetchSkills'),
-              creatingContainer: t('chat:sandbox_status_creatingContainer'),
-              deployingSkills: t('chat:sandbox_status_deployingSkills', {
-                skillName: skillName ?? ''
-              }),
-              downloadingPackage: t('chat:sandbox_status_downloadingPackage'),
-              uploadingPackage: t('chat:sandbox_status_uploadingPackage'),
-              extractingPackage: t('chat:sandbox_status_extractingPackage'),
-              lazyInit: t('chat:sandbox_status_lazyInit'),
-              upgrading: t('chat:sandbox_status_upgrading')
-            };
-
-            if (phase === 'ready') {
-              return isWarmStart
-                ? t('chat:sandbox_status_ready_warm')
-                : t('chat:sandbox_status_ready_cold');
-            }
-            if (phase === 'failed') {
-              return message
-                ? t('chat:sandbox_status_failed_with_message', { message })
-                : t('chat:sandbox_status_failed');
-            }
-
-            return phaseLabelMap[phase];
+          const phaseLabelMap: Record<SandboxStatusPhase, string> = {
+            creatingContainer: t('chat:sandbox_status_creatingContainer'),
+            downloadingPackage: t('chat:sandbox_status_downloadingPackage'),
+            extractingPackage: t('chat:sandbox_status_extractingPackage'),
+            lazyInit: t('chat:sandbox_status_lazyInit'),
+            upgrading: t('chat:sandbox_status_upgrading'),
+            ready: t('chat:sandbox_status_ready'),
+            // 仅保留短状态标签；具体报错正文由 ChatErrorCard 统一展示，避免标题和正文重复。
+            failed: t('chat:sandbox_status_failed')
           };
           return {
             ...item,
             status: 'loading' as const,
-            moduleName: getSandboxPhaseLabel()
+            moduleName: phaseLabelMap[sandboxStatus.phase]
           };
         }
         if (event === SseResponseEventEnum.skillCall && skill) {
@@ -867,19 +846,6 @@ export const useChatGenerate = ({
                 if (index !== state.length - 1) return item;
 
                 const responseData = mergeNodeResponseDataByIdAndParent(item.responseData || []);
-                if (!abortSignal?.signal?.aborted) {
-                  const errorText = getChatItemErrorText(responseData)?.errorText;
-                  const errorMsg = errorText ? t(errorText) : undefined;
-
-                  return {
-                    ...item,
-                    status: ChatStatusEnum.finish,
-                    time: new Date(),
-                    responseData,
-                    errorMsg
-                  };
-                }
-
                 return {
                   ...item,
                   status: ChatStatusEnum.finish,

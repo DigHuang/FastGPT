@@ -187,12 +187,15 @@ const formatAiContent = ({
   const aiResponse = { ...aiContent };
   delete aiResponse.responseData;
   const errorCount = workflowRuntimeSummary?.errorCount ?? 0;
+  // 仅落库未捕获的根工作流错误（summary 已剔除 errorCaptured 与工具错误），
+  // 保证刷新历史或在 Share/OutLink 裁剪 nodeResponse 后仍能展示错误卡片。
+  const resolvedErrorMsg = errorMsg || workflowRuntimeSummary?.errorText || undefined;
 
   return {
     aiResponse: {
       ...aiResponse,
       durationSeconds,
-      errorMsg,
+      errorMsg: resolvedErrorMsg,
       citeCollectionIds: workflowRuntimeSummary?.citeCollectionIds || []
     },
     errorCount
@@ -996,6 +999,10 @@ export const updateInteractiveChat = async ({
         entries: aiContent.memories,
         rootSource: chatSource
       });
+    }
+
+    if (aiResponse.errorMsg) {
+      chatItem.errorMsg = aiResponse.errorMsg;
     }
 
     chatItem.durationSeconds = chatItem.durationSeconds
