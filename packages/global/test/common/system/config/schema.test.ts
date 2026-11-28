@@ -27,6 +27,13 @@ describe('Domain default config and overrides validation', () => {
     const defaults = getDomainDefaultConfig('subservice').agentSandbox.opensandbox;
     expect(defaults.cpuOvercommitFactor).toBe(1);
     expect(defaults.memoryOvercommitFactor).toBe(1);
+    expect(defaults.enableDynamicPvcResize).toBe(false);
+    expect(
+      resolveDomainEffectiveConfig({
+        domain: 'subservice',
+        overrides: { agentSandbox: { opensandbox: { enableDynamicPvcResize: true } } }
+      }).agentSandbox.opensandbox.enableDynamicPvcResize
+    ).toBe(true);
     for (const key of ['cpuOvercommitFactor', 'memoryOvercommitFactor'] as const) {
       for (const value of [1, 1.5, 10]) {
         expect(

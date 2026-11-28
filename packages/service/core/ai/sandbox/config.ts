@@ -6,8 +6,12 @@
  *
  * 所有字段以实例配置快照为唯一运行时来源；ENV 只在启动迁移时一次性 seed 进 DB。
  */
-import { storageSizeGiToBytes } from '@fastgpt/global/core/ai/sandbox/constants';
+import {
+  storageSizeGiToBytes,
+  storageSizeGiToMiB
+} from '@fastgpt/global/core/ai/sandbox/constants';
 import { getSystemInstanceConfig } from '../../../common/system/systemInstanceConfig/runtime';
+import { SANDBOX_PVC_RESIZE_INITIAL_MIB } from './constants';
 
 type AgentSandboxInstanceConfig = ReturnType<
   typeof getSystemInstanceConfig
@@ -39,3 +43,17 @@ export const isAgentSandboxOpenSandboxConfigured = (): boolean => {
 /** 获取 Agent sandbox 磁盘基准字节数，直接按 PVC 存储容量换算（归档、恢复与 Skill 注入均流式传输，容器 `/tmp` 零暂存）。 */
 export const getAgentSandboxDiskBytes = () =>
   storageSizeGiToBytes(getAgentSandboxCommonConfig().storageSizeGi);
+
+/** 当前是否已启用 Kubernetes 动态 PVC 在线扩容（仅 kubernetes 运行时生效）。 */
+export const isAgentSandboxDynamicPvcResizeEnabled = (): boolean => {
+  const opensandbox = getAgentSandboxOpenSandboxConfig();
+  return opensandbox.runtime === 'kubernetes' && opensandbox.enableDynamicPvcResize;
+};
+
+/** 派生新会话初始化 PVC 容量：开启动态扩容时以 `512Mi` 起步（封顶 `storageSizeGi`），否则直接分配 `storageSizeGi`。 */
+export const getInitialSandboxVolumeStorageSize = (): string => {
+  const { storageSizeGi } = getAgentSandboxCommonConfig();
+  return isAgentSandboxDynamicPvcResizeEnabled()
+    ? `${Math.min(SANDBOX_PVC_RESIZE_INITIAL_MIB, storageSizeGiToMiB(storageSizeGi))}Mi`
+    : `${storageSizeGi}Gi`;
+};

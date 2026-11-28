@@ -37,7 +37,7 @@ pnpm test
 - `app=fastgpt`
 - `managed-by=fastgpt-volume-manager`
 
-`POST /v1/volumes/ensure`、`GET /v1/volumes/:claimName` 与 `DELETE /v1/volumes/:claimName` 均会校验目标卷的所有权标签；若同名卷已存在但缺少完整托管标签，服务拒绝操作并返回 **`403 Forbidden`**，避免误操作外部资源。
+`POST /v1/volumes/ensure`、`GET /v1/volumes/:claimName`、`PATCH /v1/volumes/:claimName/resize` 与 `DELETE /v1/volumes/:claimName` 均会校验目标卷的所有权标签；若同名卷已存在但缺少完整托管标签，服务拒绝操作并返回 **`403 Forbidden`**，避免误操作外部资源。
 
 4.18.0 过渡期（移除窗口 `>= 4.19.0`）在 `GET /v1/volumes/:claimName` 与 `DELETE /v1/volumes/:claimName` 上支持可选查询参数 `?allowLegacyUnlabeled=true`，用于只读核验或清理迁移期前遗留的无标签（或仅含部分 FastGPT 标签）存量卷；即便开启该参数，仍会严格拒绝携带其他平台标记（`app.kubernetes.io/*`、`com.docker.compose.*`、`k8s-app`、`helm.sh/chart` 或冲突的 `app` / `managed-by`）的外部卷。
 
@@ -59,15 +59,15 @@ GET /v1/volumes
 
 按 `app=fastgpt` 与 `managed-by=fastgpt-volume-manager` 标签过滤并校验名称格式；Kubernetes 模式下自动跳过处于 `Terminating`（存在 `deletionTimestamp`）的 PVC。
 
-### 检查存储卷是否存在
+### 查询存储卷状态
 
 ```http
 GET /v1/volumes/:claimName[?allowLegacyUnlabeled=true]
 ```
 
-只读核验目标持久卷是否存在且归属本服务（绝不触发新建卷）：
+只读核验目标持久卷是否存在且归属本服务（绝不触发新建卷），Kubernetes 模式下附带 PVC 声明容量、实际容量与状态条件：
 
-- 卷存在且归属合法（Kubernetes 下处于活跃非 `Terminating` 态）：返回 `200`，`{ "claimName": "..." }`
+- 卷存在且归属合法（Kubernetes 下处于活跃非 `Terminating` 态）：返回 `200`，`{ "claimName": "...", "requestedBytes": 536870912, "capacityBytes": 536870912, "conditions": [...] }`（Docker 模式仅返回 `{ "claimName": "..." }`）
 - 卷不存在（或 Kubernetes 下正在删除）：返回 `404`
 - 卷存在但不归属本服务：返回 `403`
 - `claimName` 格式非法：返回 `400`
@@ -89,6 +89,20 @@ Content-Type: application/json
 - 请求体非法：返回 `400`
 - 同名卷存在但不归属本服务：返回 `403`
 - Kubernetes 下同名 PVC 处于 `Terminating` 等待释放超时：返回 `504`
+
+### 扩容存储卷（仅 Kubernetes）
+
+```
+PATCH /v1/volumes/:claimName/resize
+Content-Type: application/json
+
+{ "storageSize": "1024Mi" }
+```
+
+响应：`200 OK`，`{ "claimName": "...", "resized": true, "requestedBytes": 1073741824, "capacityBytes": 536870912 }`。
+
+- 若当前 PVC `spec.resources.requests.storage` 已大于等于目标容量，直接幂等返回 `resized: false`（禁止缩容并防止并发重复扩容）。
+- 要求对应 StorageClass 开启 `allowVolumeExpansion: true`，底层 CSI 支持在线扩容，且 Role 具备 `patch` 权限。
 
 ### 删除存储卷
 
@@ -163,7 +177,7 @@ kind: Role
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "create", "delete"]
+    verbs: ["get", "list", "create", "patch", "delete"]
 ```
 
 volume-manager 使用集群内 ServiceAccount 认证，无需挂载外部 kubeconfig。
@@ -182,7 +196,7 @@ src/
 ├── index.ts              # 入口，Hono + @hono/node-server 初始化、鉴权与优雅停机
 ├── env.ts                # 环境变量校验
 ├── routes/
-│   └── volumes.ts        # /v1/volumes 路由（list / exists / ensure / delete）
+│   └── volumes.ts        # /v1/volumes 路由（list / inspect / ensure / resize / delete）
 ├── drivers/
 │   ├── IVolumeDriver.ts  # 驱动接口
 │   ├── DockerVolumeDriver.ts

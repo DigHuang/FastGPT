@@ -315,6 +315,21 @@ fn parse_target_dir_header(headers: &HeaderMap) -> Result<Option<String>, String
     Ok(Some(decoded))
 }
 
+/// 展开 `Error::source()` 链（如 `tar::TarError` 包装的底层 `ENOSPC`），避免 HTTP 500 响应丢失原始 OS 错误。
+fn format_error_chain(err: &dyn std::error::Error) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !cause_text.is_empty() && !message.contains(&cause_text) {
+            message.push_str(": ");
+            message.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+    message
+}
+
 fn unpack_tar_zst(reader: impl Read, target: &Path) -> io::Result<()> {
     fs::create_dir_all(target)?;
     let mut archive = tar::Archive::new(zstd::stream::read::Decoder::new(reader)?);
@@ -349,8 +364,9 @@ pub(crate) async fn extract_from_body(
             no_content_response()
         }
         Ok(Err(error)) => {
-            error!("Failed to extract archive: {error}");
-            text_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+            let detail = format_error_chain(&error);
+            error!("Failed to extract archive: {detail}");
+            text_response(StatusCode::INTERNAL_SERVER_ERROR, detail)
         }
         Err(error) => text_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
@@ -653,6 +669,35 @@ mod tests {
         assert_eq!(
             extract(dst.path(), None, archive).await.status(),
             StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_surfaces_underlying_os_error_in_http_500_body() {
+        // 真实触发 tar::Archive::unpack 失败（目标路径被非空目录占用），验证 HTTP 500 正文携带底层 OS 错误而非仅外层文案。
+        let dst = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dst.path().join("conflict/nested")).unwrap();
+        let archive = tar_zst(|builder| {
+            let mut file = tar::Header::new_gnu();
+            file.set_size(4);
+            file.set_mode(0o644);
+            builder
+                .append_data(&mut file, "conflict", &b"data"[..])
+                .unwrap();
+        });
+        let response = extract(dst.path(), None, archive).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(body.contains("failed to unpack"), "unexpected body: {body}");
+        assert!(
+            body.contains("os error") || body.to_ascii_lowercase().contains("directory"),
+            "expected underlying OS error in HTTP 500 body, got: {body}"
         );
     }
 }

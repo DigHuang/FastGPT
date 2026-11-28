@@ -227,6 +227,7 @@ export const adminConfigPageFieldsMap: Record<string, readonly string[]> = {
     'subservice.agentSandbox.opensandbox.runtime',
     'subservice.agentSandbox.opensandbox.cpuOvercommitFactor',
     'subservice.agentSandbox.opensandbox.memoryOvercommitFactor',
+    'subservice.agentSandbox.opensandbox.enableDynamicPvcResize',
     'subservice.agentSandbox.opensandbox.image',
     'subservice.agentSandbox.opensandbox.useServerProxy',
     'subservice.agentSandbox.opensandbox.enableUpstreamProxy',

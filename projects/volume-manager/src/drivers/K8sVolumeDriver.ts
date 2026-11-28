@@ -4,8 +4,13 @@ import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import {
   SandboxVolumeNameSchema,
+  SandboxVolumePvcConditionSchema,
   type SandboxVolumeEnsureRequest,
-  type SandboxVolumeEnsureResponse
+  type SandboxVolumeEnsureResponse,
+  type SandboxVolumeInspectResponse,
+  type SandboxVolumePvcCondition,
+  type SandboxVolumeResizeRequest,
+  type SandboxVolumeResizeResponse
 } from '@fastgpt/global/core/ai/sandbox/volume';
 import type { IVolumeDriver } from './IVolumeDriver';
 import { env } from '../env';
@@ -20,24 +25,85 @@ const CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
 const DEFAULT_PVC_STORAGE_SIZE = '1Gi';
 const DEFAULT_PVC_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_PVC_POLL_INTERVAL_MS = 500;
+const MAX_RESIZE_CONFLICT_ATTEMPTS = 5;
+
+const K8S_UNIT_BYTES: Record<string, number> = {
+  Ki: 1024,
+  Mi: 1024 ** 2,
+  Gi: 1024 ** 3,
+  Ti: 1024 ** 4,
+  Pi: 1024 ** 5,
+  k: 1e3,
+  M: 1e6,
+  G: 1e9,
+  T: 1e12,
+  P: 1e15
+};
+
+/** 将 Kubernetes storage quantity（如 `512Mi`、`1Gi`、`1e9`）解析为正字节数；格式非法返回 `undefined`。 */
+const parseK8sStorageBytes = (quantity?: string): number | undefined => {
+  const raw = quantity?.trim();
+  if (!raw) return undefined;
+  const match = /^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti|Pi|k|M|G|T|P)?$/.exec(raw);
+  const bytes = match
+    ? Math.round(Number(match[1]) * (match[2] ? K8S_UNIT_BYTES[match[2]] : 1))
+    : /^\d+(?:\.\d+)?[eE][+-]?\d+$/.test(raw)
+      ? Math.round(Number(raw))
+      : NaN;
+  return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : undefined;
+};
 
 const K8sPvcSchema = z.object({
   metadata: z.object({
     name: z.string().min(1).optional(),
     uid: z.string().min(1),
+    resourceVersion: z.string().min(1).optional(),
     deletionTimestamp: z.string().nullable().optional(),
     labels: z.record(z.string(), z.string()).optional()
-  })
+  }),
+  spec: z
+    .object({
+      resources: z
+        .object({
+          requests: z
+            .object({
+              storage: z.string().optional()
+            })
+            .optional()
+        })
+        .optional()
+    })
+    .optional(),
+  status: z
+    .object({
+      capacity: z
+        .object({
+          storage: z.string().optional()
+        })
+        .optional(),
+      conditions: z.array(SandboxVolumePvcConditionSchema).optional()
+    })
+    .optional()
 });
 
 const K8sPvcListSchema = z.object({
   items: z.array(K8sPvcSchema)
 });
 
+type K8sPvcDetails = {
+  uid: string;
+  resourceVersion?: string;
+  managed: boolean;
+  legacyAdoptable: boolean;
+  requestedBytes?: number;
+  capacityBytes?: number;
+  conditions?: SandboxVolumePvcCondition[];
+};
+
 type K8sPvcState =
   | { state: 'absent' }
-  | { state: 'active'; uid: string; managed: boolean; legacyAdoptable: boolean }
-  | { state: 'deleting'; uid: string; managed: boolean; legacyAdoptable: boolean };
+  | ({ state: 'active' } & K8sPvcDetails)
+  | ({ state: 'deleting' } & K8sPvcDetails);
 
 export type K8sVolumeDriverOptions = {
   namespace?: string;
@@ -83,7 +149,34 @@ export class K8sVolumeDriver implements IVolumeDriver {
     return name ? `${base}/${name}` : base;
   }
 
-  /** 读取 PVC 的 generation 和删除状态，避免把 Terminating 对象当成可挂载资源。 */
+  /** 提取 PVC 的声明容量与实际容量字节数，供 inspect / resize 响应复用。 */
+  private pickStorageFields(
+    details: Pick<K8sPvcDetails, 'requestedBytes' | 'capacityBytes'>
+  ): Pick<SandboxVolumeResizeResponse, 'requestedBytes' | 'capacityBytes'> {
+    return {
+      ...(details.requestedBytes !== undefined ? { requestedBytes: details.requestedBytes } : {}),
+      ...(details.capacityBytes !== undefined ? { capacityBytes: details.capacityBytes } : {})
+    };
+  }
+
+  /** 从已校验的 K8s PVC 对象提取归属、版本、容量字节数与扩容状态条件。 */
+  private extractPvcDetails(parsed: z.infer<typeof K8sPvcSchema>): K8sPvcDetails {
+    return {
+      uid: parsed.metadata.uid,
+      ...(parsed.metadata.resourceVersion
+        ? { resourceVersion: parsed.metadata.resourceVersion }
+        : {}),
+      managed: isManagedLabels(parsed.metadata.labels),
+      legacyAdoptable: canAdoptLegacyLabels(parsed.metadata.labels),
+      ...this.pickStorageFields({
+        requestedBytes: parseK8sStorageBytes(parsed.spec?.resources?.requests?.storage),
+        capacityBytes: parseK8sStorageBytes(parsed.status?.capacity?.storage)
+      }),
+      ...(parsed.status?.conditions?.length ? { conditions: parsed.status.conditions } : {})
+    };
+  }
+
+  /** 读取 PVC 的 generation、容量状态和删除状态，避免把 Terminating 对象当成可挂载资源。 */
   private async readPvc(name: string): Promise<K8sPvcState> {
     const url = this.pvcUrl(name);
     const res = await this.k8sFetch(url);
@@ -103,12 +196,10 @@ export class K8sVolumeDriver implements IVolumeDriver {
     if (!parsed.success) {
       throw new Error(`K8s PVC GET returned invalid metadata for ${this.namespace}/${name}`);
     }
-    const { uid, deletionTimestamp, labels } = parsed.data.metadata;
-    const managed = isManagedLabels(labels);
-    const legacyAdoptable = canAdoptLegacyLabels(labels);
-    return deletionTimestamp
-      ? { state: 'deleting', uid, managed, legacyAdoptable }
-      : { state: 'active', uid, managed, legacyAdoptable };
+    const details = this.extractPvcDetails(parsed.data);
+    return parsed.data.metadata.deletionTimestamp
+      ? { state: 'deleting', ...details }
+      : { state: 'active', ...details };
   }
 
   /**
@@ -157,16 +248,135 @@ export class K8sVolumeDriver implements IVolumeDriver {
     }
   }
 
-  /** 只读核验 PVC 是否存在、处于活跃态且归属当前 volume-manager（绝不触发新建 PVC）。 */
-  async exists(name: string, options?: { allowLegacyUnlabeled?: boolean }): Promise<boolean> {
+  /** 只读查询活跃 PVC 的容量与状态条件（绝不触发新建 PVC）。 */
+  async inspect(
+    name: string,
+    options?: { allowLegacyUnlabeled?: boolean }
+  ): Promise<SandboxVolumeInspectResponse | null> {
     const current = await this.readPvc(name);
-    if (current.state === 'absent') return false;
+    if (current.state === 'absent') return null;
     this.assertPvcOwnership({
       name,
       current,
       allowLegacyUnlabeled: options?.allowLegacyUnlabeled
     });
-    return current.state === 'active';
+    if (current.state !== 'active') return null;
+    return {
+      claimName: name,
+      ...this.pickStorageFields(current),
+      ...(current.conditions ? { conditions: current.conditions } : {})
+    };
+  }
+
+  /**
+   * 幂等扩容已托管 PVC 的 `spec.resources.requests.storage`。
+   *
+   * 若当前声明容量已满足或大于目标容量，直接幂等返回 `resized: false`（禁止缩容）；
+   * PATCH 携带 `metadata.resourceVersion` 乐观锁并在 `409 Conflict` 时有界重试，防止 K8s 1.27+
+   * `RecoverVolumeExpansionFailure` 场景下并发较小请求静默回退已提交的更大扩容目标。
+   */
+  async resize(
+    name: string,
+    params: SandboxVolumeResizeRequest
+  ): Promise<SandboxVolumeResizeResponse> {
+    const targetBytes = parseK8sStorageBytes(params.storageSize);
+    if (targetBytes === undefined) {
+      throw new HTTPException(400, {
+        message: `Invalid K8s PVC storageSize: ${params.storageSize}`
+      });
+    }
+
+    const patchUrl = this.pvcUrl(name);
+
+    for (let attempt = 1; attempt <= MAX_RESIZE_CONFLICT_ATTEMPTS; attempt += 1) {
+      const current = await this.readPvc(name);
+      if (current.state === 'absent') {
+        throw new HTTPException(404, {
+          message: `K8s PVC ${this.namespace}/${name} not found`
+        });
+      }
+      this.assertPvcOwnership({ name, current });
+      if (current.state === 'deleting') {
+        throw new HTTPException(409, {
+          message: `K8s PVC ${this.namespace}/${name} is terminating`
+        });
+      }
+
+      if (current.requestedBytes !== undefined && current.requestedBytes >= targetBytes) {
+        return {
+          claimName: name,
+          resized: false,
+          ...this.pickStorageFields(current)
+        };
+      }
+
+      const patchRes = await this.k8sFetch(patchUrl, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/merge-patch+json'
+        },
+        body: JSON.stringify({
+          ...(current.resourceVersion
+            ? { metadata: { resourceVersion: current.resourceVersion } }
+            : {}),
+          spec: {
+            resources: {
+              requests: {
+                storage: params.storageSize
+              }
+            }
+          }
+        })
+      });
+      logger.debug('K8s PATCH PVC resize', {
+        url: patchUrl,
+        claimName: name,
+        storageSize: params.storageSize,
+        attempt,
+        status: patchRes.status
+      });
+
+      if (!patchRes.ok) {
+        const text = await patchRes.text().catch(() => '');
+        // 乐观锁冲突（409）：重读最新 PVC；若并发更大请求已胜出则幂等返回 resized: false，若较小请求胜出则用新 resourceVersion 重试。
+        if (patchRes.status === 409 && attempt < MAX_RESIZE_CONFLICT_ATTEMPTS) {
+          continue;
+        }
+        if (
+          patchRes.status === 400 ||
+          patchRes.status === 403 ||
+          patchRes.status === 404 ||
+          patchRes.status === 409 ||
+          patchRes.status === 422
+        ) {
+          throw new HTTPException(patchRes.status, {
+            message: `K8s PVC resize failed (${patchRes.status}): ${text}`
+          });
+        }
+        throw new Error(`K8s PVC resize failed (${patchRes.status}): ${text}`);
+      }
+
+      const rawBody: unknown = await patchRes.json().catch(() => null);
+      const parsed = K8sPvcSchema.safeParse(rawBody);
+      if (!parsed.success) {
+        return {
+          claimName: name,
+          resized: true,
+          requestedBytes: targetBytes
+        };
+      }
+
+      const updated = this.extractPvcDetails(parsed.data);
+      return {
+        claimName: name,
+        resized: true,
+        ...this.pickStorageFields(updated)
+      };
+    }
+
+    throw new HTTPException(409, {
+      message: `K8s PVC ${this.namespace}/${name} resize conflict exceeded retry limit`
+    });
   }
 
   async ensure(params: SandboxVolumeEnsureRequest): Promise<SandboxVolumeEnsureResponse> {

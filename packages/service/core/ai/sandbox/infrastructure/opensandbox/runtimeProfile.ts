@@ -16,7 +16,7 @@ import { joinSandboxPath } from '../../utils';
 import type { Volume } from '@alibaba-group/opensandbox';
 import { SANDBOX_PROVIDER, type SandboxProviderType } from '../../type';
 import { buildOpenSandboxNetworkOptions, buildSandboxOutboundProxyEnv } from './network';
-import type { ImageSpec, ResourceLimits, SandboxCreateSpec } from './type';
+import type { ImageSpec, OpenSandboxRuntime, ResourceLimits, SandboxCreateSpec } from './type';
 import { parseImageSpec } from './utils';
 
 const OPEN_SANDBOX_ENTRYPOINT = '/usr/local/bin/entrypoint.sh';
@@ -84,6 +84,7 @@ export function getSandboxRuntimeProfile(): SandboxRuntimeProfile {
  * - 设置 `HOME`、`FASTGPT_WORKDIR`、`PIP_BREAK_SYSTEM_PACKAGES=1` 与 `PIP_NO_CACHE_DIR=1`。
  */
 export function buildBaseSandboxRuntimeEnv({
+  runtime = getAgentSandboxOpenSandboxConfig().runtime,
   workDirectory = OPEN_SANDBOX_DEFAULT_ROOT_PATH,
   ideAgentMaxFileBytes = getAgentSandboxDiskBytes(),
   ideAgentWsLimits = {
@@ -91,6 +92,7 @@ export function buildBaseSandboxRuntimeEnv({
     maxFrameBytes: SANDBOX_WS_MAX_FRAME_BYTES
   }
 }: {
+  runtime?: OpenSandboxRuntime;
   workDirectory?: string;
   ideAgentMaxFileBytes?: number;
   ideAgentWsLimits?: {
@@ -99,7 +101,6 @@ export function buildBaseSandboxRuntimeEnv({
   };
 } = {}): Record<string, string> {
   const normalizedWorkDir = workDirectory.replace(/\/+$/, '') || OPEN_SANDBOX_DEFAULT_ROOT_PATH;
-  const { runtime } = getAgentSandboxOpenSandboxConfig();
 
   return {
     HOME: OPEN_SANDBOX_DEFAULT_HOME_PATH,

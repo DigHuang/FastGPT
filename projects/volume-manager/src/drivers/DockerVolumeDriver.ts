@@ -4,7 +4,10 @@ import { z } from 'zod';
 import {
   SandboxVolumeNameSchema,
   type SandboxVolumeEnsureRequest,
-  type SandboxVolumeEnsureResponse
+  type SandboxVolumeEnsureResponse,
+  type SandboxVolumeInspectResponse,
+  type SandboxVolumeResizeRequest,
+  type SandboxVolumeResizeResponse
 } from '@fastgpt/global/core/ai/sandbox/volume';
 import type { IVolumeDriver } from './IVolumeDriver';
 import { env } from '../env';
@@ -94,19 +97,33 @@ export class DockerVolumeDriver implements IVolumeDriver {
     return true;
   }
 
-  /** 只读核验持久卷是否存在且归属当前 volume-manager（绝不触发新建卷）。 */
-  async exists(claimName: string, options?: { allowLegacyUnlabeled?: boolean }): Promise<boolean> {
-    return this.inspectOwnedVolume({
+  /** 只读查询 Docker named volume 是否存在且归属当前 volume-manager（绝不触发新建卷）。 */
+  async inspect(
+    claimName: string,
+    options?: { allowLegacyUnlabeled?: boolean }
+  ): Promise<SandboxVolumeInspectResponse | null> {
+    const found = await this.inspectOwnedVolume({
       claimName,
       action: 'inspect',
       allowLegacyUnlabeled: options?.allowLegacyUnlabeled
+    });
+    return found ? { claimName } : null;
+  }
+
+  /** Docker named volume 不支持 PVC 动态扩容，容量上限由 FastGPT 侧磁盘软限制控制。 */
+  async resize(
+    _claimName: string,
+    _params: SandboxVolumeResizeRequest
+  ): Promise<SandboxVolumeResizeResponse> {
+    throw new HTTPException(400, {
+      message: 'Docker volumes do not support dynamic PVC resize'
     });
   }
 
   async ensure(params: SandboxVolumeEnsureRequest): Promise<SandboxVolumeEnsureResponse> {
     const name = params.claimName;
 
-    if (await this.exists(name)) {
+    if (await this.inspect(name)) {
       return { claimName: name, created: false };
     }
 

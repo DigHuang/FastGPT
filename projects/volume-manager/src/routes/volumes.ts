@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import {
   SandboxVolumeEnsureRequestSchema,
-  SandboxVolumeNameSchema
+  SandboxVolumeNameSchema,
+  SandboxVolumeResizeRequestSchema
 } from '@fastgpt/global/core/ai/sandbox/volume';
 import type { IVolumeDriver } from '../drivers/IVolumeDriver';
 import { getLogger, LogCategories } from '../utils/logger';
@@ -27,14 +28,18 @@ export function volumeRoutes(driver: IVolumeDriver): Hono {
 
     // [4.18.0 legacy compat, remove in >= 4.19.0] 允许只读核验 4.18.0 迁移期之前的无标签存量持久卷
     const allowLegacyUnlabeled = c.req.query('allowLegacyUnlabeled') === 'true';
-    const found = allowLegacyUnlabeled
-      ? await driver.exists(parsedName.data, { allowLegacyUnlabeled: true })
-      : await driver.exists(parsedName.data);
-    logger.debug('Inspected volume', { claimName: parsedName.data, found, allowLegacyUnlabeled });
-    if (!found) {
+    const inspected = allowLegacyUnlabeled
+      ? await driver.inspect(parsedName.data, { allowLegacyUnlabeled: true })
+      : await driver.inspect(parsedName.data);
+    logger.debug('Inspected volume', {
+      claimName: parsedName.data,
+      found: Boolean(inspected),
+      allowLegacyUnlabeled
+    });
+    if (!inspected) {
       return c.json({ error: 'Volume not found' }, 404);
     }
-    return c.json({ claimName: parsedName.data }, 200);
+    return c.json(inspected, 200);
   });
 
   // POST /v1/volumes/ensure
@@ -53,6 +58,29 @@ export function volumeRoutes(driver: IVolumeDriver): Hono {
     const status = result.created ? 201 : 200;
     logger.info('Ensured volume', { claimName: result.claimName, created: result.created });
     return c.json(result, status);
+  });
+
+  // PATCH /v1/volumes/:claimName/resize
+  app.patch('/:claimName/resize', async (c) => {
+    const parsedName = SandboxVolumeNameSchema.safeParse(c.req.param('claimName'));
+    if (!parsedName.success) {
+      return c.json({ error: 'Invalid volume name', details: parsedName.error.issues }, 400);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsedBody = SandboxVolumeResizeRequestSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return c.json({ error: 'Invalid request body', details: parsedBody.error.issues }, 400);
+    }
+
+    const result = await driver.resize(parsedName.data, parsedBody.data);
+    logger.info('Resized volume', {
+      claimName: result.claimName,
+      resized: result.resized,
+      requestedBytes: result.requestedBytes,
+      capacityBytes: result.capacityBytes
+    });
+    return c.json(result, 200);
   });
 
   // DELETE /v1/volumes/:claimName

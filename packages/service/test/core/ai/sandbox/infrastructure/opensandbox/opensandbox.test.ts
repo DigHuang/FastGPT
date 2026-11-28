@@ -79,6 +79,7 @@ vi.mock('@alibaba-group/opensandbox', () => ({
     withTransportIfMissing() {
       return this;
     }
+    closeTransport = vi.fn(async () => undefined);
   },
   DEFAULT_EXECD_PORT: 44772,
   ExecutionEventDispatcher: class ExecutionEventDispatcher {
@@ -250,6 +251,48 @@ describe('opensandbox client and lifecycle helpers', () => {
     );
     expect(client.rootPath).toBe('/home/sandbox/workspace');
     expect(client.id).toBe('remote-1');
+    expect(client.workspaceClaimName).toBe('fastgpt-session-sb-1-abc');
+  });
+
+  it('isolates ConnectionConfig transports when isolatedConnection=true and closes them on create/close without touching shared pool', async () => {
+    const sharedClient = createRuntimeOpenSandboxClient({ sandboxId: 'sb-shared-base' });
+    mocks.sandboxCreate.mockResolvedValueOnce(createSdkSandbox('remote-shared'));
+    mocks.sandboxConnect.mockResolvedValueOnce(createSdkSandbox('remote-shared'));
+    await sharedClient.create();
+    const sharedRegularConn = mocks.sandboxConnect.mock.calls[0]?.[0]?.connectionConfig;
+    const sharedCreateConn = mocks.sandboxCreate.mock.calls[0]?.[0]?.connectionConfig;
+
+    const isolatedClient = createRuntimeOpenSandboxClient({
+      sandboxId: 'sb-isolated-probe',
+      isolatedConnection: true
+    });
+    mocks.sandboxCreate.mockResolvedValueOnce(createSdkSandbox('remote-iso-1'));
+    mocks.sandboxConnect.mockResolvedValueOnce(createSdkSandbox('remote-iso-1'));
+    await isolatedClient.create();
+
+    const isoCreateConn = mocks.sandboxCreate.mock.calls[1]?.[0]?.connectionConfig;
+    const isoRegularConn = mocks.sandboxConnect.mock.calls[1]?.[0]?.connectionConfig;
+    expect(isoCreateConn).not.toBe(sharedCreateConn);
+    expect(isoRegularConn).not.toBe(sharedRegularConn);
+    expect(isoCreateConn.closeTransport).toHaveBeenCalledTimes(1);
+    expect(sharedRegularConn.closeTransport).not.toHaveBeenCalled();
+
+    await isolatedClient.close();
+    expect(isoRegularConn.closeTransport).toHaveBeenCalledTimes(1);
+
+    // rebind 失败时，210s create 连接保留到 client.close() 再释放
+    const fallbackClient = createRuntimeOpenSandboxClient({
+      sandboxId: 'sb-isolated-rebind-fail',
+      isolatedConnection: true
+    });
+    mocks.sandboxCreate.mockResolvedValueOnce(createSdkSandbox('remote-iso-2'));
+    mocks.sandboxConnect.mockRejectedValueOnce(new Error('rebind transient failure'));
+    await fallbackClient.create();
+
+    const fallbackCreateConn = mocks.sandboxCreate.mock.calls[2]?.[0]?.connectionConfig;
+    expect(fallbackCreateConn.closeTransport).not.toHaveBeenCalled();
+    await fallbackClient.close();
+    expect(fallbackCreateConn.closeTransport).toHaveBeenCalledTimes(1);
   });
 
   it('forwards credentialProxy to Sandbox.create in docker mode when enableUpstreamProxy is enabled', async () => {

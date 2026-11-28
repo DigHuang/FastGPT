@@ -123,6 +123,10 @@ describe('sandbox upload API', () => {
       userId: 'user-1',
       chatId: 'chat-1'
     });
+    expect(mocks.assertSandboxWorkspaceWritable).toHaveBeenCalledWith(expect.anything(), {
+      rethrowRecoverable: true,
+      incomingBytes: 4
+    });
     expect(mocks.createDirectories).toHaveBeenCalledWith(['/workspace/sessions/chat-1/uploads']);
     expect(mocks.writeFiles).toHaveBeenCalledWith([
       {

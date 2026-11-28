@@ -6,7 +6,7 @@
 import type { z } from 'zod';
 import type { SandboxClient } from '../runtime/client';
 import type { ChatCompletionToolMessageContentPart } from '@fastgpt/global/core/ai/llm/type';
-import { formatAgentDiskQuotaNotice, getSandboxDiskQuotaStatus } from '../quota';
+import { formatAgentDiskQuotaNotice, prepareSandboxDiskForWrite } from '../quota';
 import { isSandboxDiskFullError } from '../../infrastructure/opensandbox/errors';
 
 /** 工具执行前的业务校验；返回拒绝原因时不访问沙箱。 */
@@ -33,8 +33,10 @@ export type ToolDefinition<
   zodSchema: S;
   /** 如 `exec()` 已内建 ensureAvailable + 降级契约的工具可跳过外层前置激活。 */
   skipEnsureAvailable?: boolean;
-  /** 写/改工具启用：在 runWithRecovery 内确认容器可用后再探测 Docker 磁盘配额。 */
+  /** 写/改工具启用：在 runWithRecovery 内确认容器可用后再探测 Docker 磁盘配额或 K8s 动态 PVC 水位。 */
   requiresWritableDisk?: boolean;
+  /** 可选：估算本次工具即将写入的字节数，供 Kubernetes 动态 PVC 写前一步扩足空间。 */
+  estimateIncomingBytes?: (params: z.infer<S>) => number | undefined;
   execute: (
     ctx: ToolExecuteContext<z.infer<S>>
   ) => Promise<{ response: string; content?: ChatCompletionToolMessageContentPart[] }>;
@@ -80,9 +82,11 @@ export const createToolRunner =
 
     const outcome = await params.sandboxInstance.runWithRecovery(async () => {
       if (definition.requiresWritableDisk) {
-        const quota = await getSandboxDiskQuotaStatus(params.sandboxInstance.opensandbox, {
+        const incomingBytes = definition.estimateIncomingBytes?.(parsed.data);
+        const quota = await prepareSandboxDiskForWrite(params.sandboxInstance.opensandbox, {
           rethrowRecoverable: true,
-          signal: params.signal
+          signal: params.signal,
+          ...(incomingBytes !== undefined ? { incomingBytes } : {})
         });
         if (quota.exceeded) {
           return { quotaExceededNotice: formatAgentDiskQuotaNotice(quota, 'write') };

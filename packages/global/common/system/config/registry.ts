@@ -434,7 +434,8 @@ export const systemInstanceConfigRegistry: readonly SystemInstanceConfigRegistry
     section: 'subservice',
     keys: [
       'agentSandbox.opensandbox.cpuOvercommitFactor',
-      'agentSandbox.opensandbox.memoryOvercommitFactor'
+      'agentSandbox.opensandbox.memoryOvercommitFactor',
+      'agentSandbox.opensandbox.enableDynamicPvcResize'
     ],
     options: { edition: 'all', secret: false, applyMode: 'live' }
   }),

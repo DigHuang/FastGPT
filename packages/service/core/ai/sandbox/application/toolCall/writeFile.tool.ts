@@ -14,6 +14,7 @@ const SandboxWriteFileToolSchema = z.object({
 export const sandboxWriteFileTool = defineTool({
   zodSchema: SandboxWriteFileToolSchema,
   requiresWritableDisk: true,
+  estimateIncomingBytes: (params) => Buffer.byteLength(params.content, 'utf8'),
   execute: async ({ sandboxInstance, params }) => {
     const providerPath = sandboxInstance.resolveRuntimePath(params.path, {
       allowAbsolutePath: true

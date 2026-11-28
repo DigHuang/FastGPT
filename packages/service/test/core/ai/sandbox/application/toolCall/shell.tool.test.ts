@@ -83,6 +83,43 @@ describe('sandboxShellTool', () => {
     });
   });
 
+  it('probes filesystem statvfs under kubernetes dynamic PVC resize and still runs direct bash without prlimit', async () => {
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.runtime = 'kubernetes';
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.enableDynamicPvcResize = true;
+    const MIB = 1024 * 1024;
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            usedBytes: 100 * MIB,
+            limitBytes: null,
+            filesystem: {
+              totalBytes: 488 * MIB,
+              usedBytes: 100 * MIB,
+              availableBytes: 350 * MIB
+            }
+          }),
+          { status: 200 }
+        )
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const sandbox = createSandboxInstance({ withDiskProbe: true, id: 'sbx-k8s-dyn-shell' });
+    sandbox.opensandbox.workspaceClaimName = 'fastgpt-session-shell-0';
+
+    const result = await sandboxShellTool.execute({
+      sandboxInstance: sandbox,
+      params: { command: 'echo k8s-dyn' }
+    });
+
+    expect(result.response).toBe('out');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1319/disk-usage?scope=filesystem',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(sandbox.exec).toHaveBeenCalledWith(`exec /bin/bash -c 'echo k8s-dyn' 2>&1`);
+  });
+
   it('does not block foreground exit when background child inherits file-backed stdout/stderr and preserves truncation notices', async () => {
     const sandbox = createSandboxInstance();
 

@@ -8,6 +8,11 @@ import {
   ProbeConnectionBodySchema,
   ProbeConnectionResponseSchema
 } from '../../../openapi/admin/system/instanceConfig/probe';
+import {
+  TestSandboxPvcResizeBodySchema,
+  TestSandboxPvcResizeResponseSchema
+} from '../../../openapi/admin/system/instanceConfig/testSandboxPvcResize';
+import { openAPIDocument } from '../../../openapi/provider/devapi';
 
 describe('Instance config OpenAPI schemas', () => {
   it('validates GetDomainConfigQuerySchema', () => {
@@ -162,5 +167,46 @@ describe('Instance config OpenAPI schemas', () => {
     });
     expect(validRes.connected).toBe(true);
     expect(validRes.responseTimeMs).toBe(35);
+  });
+
+  it('validates TestSandboxPvcResize schemas and generates a valid DevAPI request example', () => {
+    const requestBody =
+      openAPIDocument.paths?.['/api/admin/system/config/testSandboxPvcResize']?.post?.requestBody;
+    if (!requestBody || '$ref' in requestBody) {
+      throw new Error('Expected inline requestBody for testSandboxPvcResize');
+    }
+    const example = requestBody.content['application/json']?.example;
+    expect(TestSandboxPvcResizeBodySchema.safeParse(example).success).toBe(true);
+
+    expect(
+      TestSandboxPvcResizeBodySchema.parse({
+        baseUrl: 'http://opensandbox:8080',
+        useStoredApiKey: true,
+        image: 'registry.local/sandbox:v1',
+        volumeManagerUrl: 'http://volume-manager:3005',
+        useStoredVolumeManagerToken: true
+      }).useServerProxy
+    ).toBe(true);
+
+    expect(
+      TestSandboxPvcResizeBodySchema.safeParse({
+        baseUrl: 'http://opensandbox:8080',
+        apiKey: 'draft-key',
+        useStoredApiKey: true,
+        image: 'registry.local/sandbox:v1',
+        volumeManagerUrl: 'http://volume-manager:3005',
+        useStoredVolumeManagerToken: true
+      }).success
+    ).toBe(false);
+
+    expect(
+      TestSandboxPvcResizeResponseSchema.parse({
+        supported: false,
+        responseTimeMs: 1200,
+        initialBytes: 512 * 1024 * 1024,
+        errorCode: 'expansion_not_allowed',
+        error: 'StorageClass does not allow volume expansion'
+      }).errorCode
+    ).toBe('expansion_not_allowed');
   });
 });

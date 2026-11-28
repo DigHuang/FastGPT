@@ -12,7 +12,7 @@ import {
   type SandboxExtractZipBody,
   type SandboxExtractZipResponse
 } from '@fastgpt/global/openapi/core/ai/sandbox/api';
-import { getSandboxDiskQuotaStatus } from '@fastgpt/service/core/ai/sandbox/application/quota';
+import { prepareSandboxDiskForWrite } from '@fastgpt/service/core/ai/sandbox/application/quota';
 import { createAgentSandboxDiskQuotaExceededError } from '@fastgpt/service/core/ai/sandbox/error';
 
 const EXTRACT_ZIP_TIMEOUT_MS = 30_000;
@@ -47,7 +47,7 @@ async function handler(
   const { sessionWorkDirectory } = sandbox.getRuntimePaths();
   // 在 runWithRecovery 内探测配额并按需启用 prlimit --fsize，避免陈旧句柄触发虚假放行及 zip bomb 写爆卷。
   const result = await sandbox.runWithRecovery(async () => {
-    const quota = await getSandboxDiskQuotaStatus(sandbox.opensandbox, {
+    const quota = await prepareSandboxDiskForWrite(sandbox.opensandbox, {
       rethrowRecoverable: true
     });
     if (quota.exceeded) {

@@ -12,7 +12,7 @@ import { ApiRequestInputParseError } from '@fastgpt/service/common/zod/requestPa
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  getSandboxDiskQuotaStatus: vi.fn(),
+  prepareSandboxDiskForWrite: vi.fn(),
   authSandboxRuntimeSession: vi.fn(),
   buildSandboxClientQueryFromChatSource: vi.fn(),
   execute: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock('@/service/core/sandbox/access', () => ({
 }));
 
 vi.mock('@fastgpt/service/core/ai/sandbox/application/quota', () => ({
-  getSandboxDiskQuotaStatus: mocks.getSandboxDiskQuotaStatus
+  prepareSandboxDiskForWrite: mocks.prepareSandboxDiskForWrite
 }));
 
 vi.mock('@fastgpt/service/core/ai/sandbox/interface/runtime', () => ({
@@ -58,7 +58,7 @@ const createReq = (path: string) =>
 describe('sandbox extractZip API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getSandboxDiskQuotaStatus.mockResolvedValue({
+    mocks.prepareSandboxDiskForWrite.mockResolvedValue({
       enabled: false,
       exceeded: false,
       usedBytes: 0,
@@ -112,7 +112,7 @@ describe('sandbox extractZip API', () => {
   });
 
   it('guards Docker extractions with prlimit --fsize inside runWithRecovery', async () => {
-    mocks.getSandboxDiskQuotaStatus.mockResolvedValueOnce({
+    mocks.prepareSandboxDiskForWrite.mockResolvedValueOnce({
       enabled: true,
       exceeded: false,
       usedBytes: 128,
@@ -223,7 +223,7 @@ describe('sandbox extractZip API', () => {
   });
 
   it('rejects extraction before invoking execd when sandbox disk quota is exceeded', async () => {
-    mocks.getSandboxDiskQuotaStatus.mockResolvedValueOnce({
+    mocks.prepareSandboxDiskForWrite.mockResolvedValueOnce({
       enabled: true,
       exceeded: true,
       usedBytes: 2048,
@@ -255,7 +255,7 @@ describe('sandbox extractZip API', () => {
       new UserError(SandboxErrEnum.agentSandboxDiskQuotaExceeded)
     );
 
-    mocks.getSandboxDiskQuotaStatus.mockResolvedValueOnce({
+    mocks.prepareSandboxDiskForWrite.mockResolvedValueOnce({
       enabled: true,
       exceeded: false,
       usedBytes: 128,

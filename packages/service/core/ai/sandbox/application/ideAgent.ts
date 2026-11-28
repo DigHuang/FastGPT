@@ -31,6 +31,9 @@ type IdeAgentEndpoint = Awaited<ReturnType<OpenSandboxClient['getEndpoint']>>;
 type IdeAgentPasswordClient = Pick<OpenSandboxClient, 'id' | 'readFiles'>;
 export type IdeAgentEndpointClient = IdeAgentPasswordClient &
   Pick<OpenSandboxClient, 'getEndpoint'>;
+export type SandboxDiskProbeClient = IdeAgentEndpointClient & {
+  workspaceClaimName?: string;
+};
 
 // 以 OpenSandbox 远端容器实例 id 为键缓存密码并设短 TTL；即使同容器内进程重启轮换了密码也能及时失效。
 const passwordCache = new Map<string, { password: string; expiresAt: number }>();
@@ -153,17 +156,21 @@ const IDE_AGENT_HTTP_RETRY_DELAY_MS = 250;
 const IDE_AGENT_DISK_USAGE_TIMEOUT_MS = 3_000;
 const IDE_AGENT_ARCHIVE_TARGET_DIR_HEADER = 'x-fastgpt-archive-target-dir-b64';
 
-type IdeAgentHttpRoute =
-  | '/archive/pack'
-  | '/archive/extract'
-  | '/disk-usage'
-  | '/disk-usage?refresh=1';
+type IdeAgentHttpRoute = '/archive/pack' | '/archive/extract' | '/disk-usage';
+
+const IdeAgentFilesystemUsageSchema = z.object({
+  totalBytes: z.number().nonnegative(),
+  availableBytes: z.number().nonnegative(),
+  usedBytes: z.number().nonnegative()
+});
+export type SandboxFilesystemUsage = z.infer<typeof IdeAgentFilesystemUsageSchema>;
 
 const IdeAgentDiskUsageResponseSchema = z.object({
   usedBytes: z.number().nonnegative(),
-  limitBytes: z.number().nonnegative().nullable().optional()
+  limitBytes: z.number().nonnegative().nullable().optional(),
+  filesystem: IdeAgentFilesystemUsageSchema.optional()
 });
-type SandboxDiskUsageSnapshot = z.infer<typeof IdeAgentDiskUsageResponseSchema>;
+export type SandboxDiskUsageSnapshot = z.infer<typeof IdeAgentDiskUsageResponseSchema>;
 
 type RequestInitWithDuplex = RequestInit & { duplex?: 'half'; dispatcher?: Agent };
 
@@ -177,15 +184,23 @@ const ideAgentHttpDispatcher = new Agent({
 const isTransientIdeAgentEndpointStatus = (status: number): boolean =>
   status === 502 || status === 503 || status === 504;
 
-/** 拼接 `fastgpt-ide-agent` 1319 端口路径，保留 OpenSandbox proxy 模式自带的路径前缀。 */
+/** 拼接 `fastgpt-ide-agent` 1319 端口路径与查询参数，保留 OpenSandbox proxy 模式自带的路径前缀。 */
 const resolveIdeAgentHttpUrl = (
   endpoint: Pick<IdeAgentEndpoint, 'url' | 'protocol'>,
-  routePath: IdeAgentHttpRoute
+  routePath: IdeAgentHttpRoute,
+  query?: Record<string, string | undefined>
 ): string => {
   const withScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(endpoint.url)
     ? endpoint.url
     : `${endpoint.protocol}://${endpoint.url}`;
-  return `${withScheme.replace(/\/+$/, '')}${routePath}`;
+  const searchParams = new URLSearchParams();
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) searchParams.set(key, value);
+    }
+  }
+  const search = searchParams.toString();
+  return `${withScheme.replace(/\/+$/, '')}${routePath}${search ? `?${search}` : ''}`;
 };
 
 /**
@@ -226,6 +241,7 @@ function resolveAgentTargetDir(targetDirectory: string | undefined): string | un
 async function fetchIdeAgentRoute(params: {
   sandbox: IdeAgentEndpointClient;
   routePath: IdeAgentHttpRoute;
+  query?: Record<string, string | undefined>;
   signal: AbortSignal;
   method?: 'GET' | 'POST';
   maxAttempts?: number;
@@ -234,7 +250,7 @@ async function fetchIdeAgentRoute(params: {
   jsonBody?: unknown;
   openBody?: () => Promise<Readable>;
 }): Promise<Response> {
-  const { signal, routePath } = params;
+  const { signal, routePath, query } = params;
   const method = params.method ?? 'POST';
   const maxAttempts = params.maxAttempts ?? IDE_AGENT_HTTP_MAX_ATTEMPTS;
   let lastError: unknown;
@@ -294,7 +310,7 @@ async function fetchIdeAgentRoute(params: {
             }),
         signal
       };
-      return await fetch(resolveIdeAgentHttpUrl(endpoint, routePath), init);
+      return await fetch(resolveIdeAgentHttpUrl(endpoint, routePath, query), init);
     } catch (fetchError) {
       if (!signal.aborted && bodyStreamError !== undefined) {
         throw new OpenBodyError(bodyStreamError);
@@ -414,21 +430,32 @@ export async function extractToSandboxDirectory(params: {
 }
 
 /**
- * 通过 `GET /disk-usage` 查询运行中容器 `$HOME` 持久卷的占盘字节数。
+ * 通过 `GET /disk-usage` 查询运行中容器 `$HOME` 持久卷的占盘字节数与挂载点 `statvfs` 文件系统容量。
  *
- * 复用统一 HTTP 路由鉴权（含 401 刷新一次口令）并施加短超时，不重试瞬时失败以保证探针快速返回。
+ * - `scope: 'filesystem'`：仅做 O(1) `statvfs` 实时查询，不扫目录树，供 Kubernetes 动态 PVC 扩容使用；
+ * - 默认：走容器内目录占盘统计与 15s 缓存，供 Docker 磁盘软限制使用。
+ * - 复用统一 HTTP 路由鉴权（含 401 刷新一次口令）；热路径默认 `maxAttempts: 1` 快速返回，
+ *   冷启动容器后首次探测（如管理后台探针或归档前采样）可传更大 `maxAttempts` 容忍端口 1319 瞬时未就绪。
  */
 export async function getSandboxDiskUsage(params: {
   sandbox: IdeAgentEndpointClient;
   refresh?: boolean;
+  scope?: 'filesystem';
+  maxAttempts?: number;
   signal?: AbortSignal;
 }): Promise<SandboxDiskUsageSnapshot> {
+  const maxAttempts = Math.max(1, params.maxAttempts ?? 1);
+  const timeoutMs = IDE_AGENT_DISK_USAGE_TIMEOUT_MS * maxAttempts;
   const response = await fetchIdeAgentRoute({
     sandbox: params.sandbox,
-    routePath: params.refresh ? '/disk-usage?refresh=1' : '/disk-usage',
+    routePath: '/disk-usage',
+    query: {
+      scope: params.scope,
+      refresh: params.refresh ? '1' : undefined
+    },
     method: 'GET',
-    maxAttempts: 1,
-    signal: withTimeout(params.signal, IDE_AGENT_DISK_USAGE_TIMEOUT_MS)
+    maxAttempts,
+    signal: withTimeout(params.signal, timeoutMs)
   });
   return IdeAgentDiskUsageResponseSchema.parse(await response.json());
 }

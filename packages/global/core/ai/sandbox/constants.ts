@@ -15,6 +15,10 @@ const GIB_BYTES = 1024 * 1024 * 1024;
 export const storageSizeGiToBytes = (storageSizeGi: number): number =>
   Math.round(storageSizeGi * GIB_BYTES);
 
+/** 将 GiB 存储配置换算为至少 1 MiB 的整数 MiB，供初始建卷与动态扩容计算共用。 */
+export const storageSizeGiToMiB = (storageSizeGi: number): number =>
+  Math.max(1, Math.round(storageSizeGi * 1024));
+
 // ---- 沙盒状态 ----
 export const SandboxStatusEnum = {
   running: 'running',

@@ -6,10 +6,10 @@
 import z from 'zod';
 import { defineTool } from './type';
 import { shellQuote } from '@fastgpt/global/common/string/utils';
-import { getAgentSandboxOpenSandboxConfig } from '../../config';
 import {
   formatAgentDiskQuotaNotice,
-  getSandboxDiskQuotaStatus,
+  hasSandboxPreWriteDiskCheck,
+  prepareSandboxDiskForWrite,
   type SandboxDiskQuotaStatus
 } from '../quota';
 import { getSandboxCommandDiskFullReason } from '../../infrastructure/opensandbox/errors';
@@ -24,14 +24,14 @@ export const sandboxShellTool = defineTool({
   zodSchema: SandboxShellToolSchema,
   skipEnsureAvailable: true,
   execute: async ({ sandboxInstance, params, signal }) => {
-    // 1. Docker 运行时在自愈上下文中确认容器可用后再探测配额，防止已回收容器绕过 RLIMIT_FSIZE；
+    // 1. 仅在当前运行时启用写前磁盘检查（Docker 软限制或 K8s 动态 PVC 扩容）时进入自愈上下文准备磁盘；
     //    非可恢复/不可用错误捕获后继续交由 sandboxInstance.exec() 统一降级返回 ExecuteResult。
     let quotaStatus: SandboxDiskQuotaStatus | undefined;
-    if (getAgentSandboxOpenSandboxConfig().runtime === 'docker') {
+    if (hasSandboxPreWriteDiskCheck()) {
       try {
         quotaStatus = await sandboxInstance.runWithRecovery(
           () =>
-            getSandboxDiskQuotaStatus(sandboxInstance.opensandbox, {
+            prepareSandboxDiskForWrite(sandboxInstance.opensandbox, {
               rethrowRecoverable: true,
               signal
             }),

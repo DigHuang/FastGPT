@@ -27,6 +27,7 @@ vi.mock('@fastgpt/service/core/ai/sandbox/infrastructure/volume/config', async (
 });
 
 import {
+  VolumeManagerHttpError,
   assertSessionVolumeExists,
   buildVolumeConfig,
   createSessionVolumeClaimName,
@@ -34,7 +35,9 @@ import {
   ensureSessionVolume,
   getSessionVolumeClaimName,
   getSessionVolumeConfig,
-  parseSandboxIdFromVolumeClaimName
+  inspectSessionVolume,
+  parseSandboxIdFromVolumeClaimName,
+  resizeSessionVolume
 } from '@fastgpt/service/core/ai/sandbox/infrastructure/volume/service';
 
 describe('sandbox volume service', () => {
@@ -200,8 +203,15 @@ describe('sandbox volume service', () => {
       })
     );
 
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'not found' });
+    const cancelBody = vi.fn(async () => undefined);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      body: { cancel: cancelBody },
+      text: async () => 'not found'
+    });
     await expect(deleteSessionVolume('fastgpt-session-missing')).resolves.toBeUndefined();
+    expect(cancelBody).toHaveBeenCalledTimes(1);
 
     volumeConfigMock.config.volumeNamePrefix = 'new-prefix';
     fetchMock.mockResolvedValueOnce({ ok: true, status: 204, text: async () => '' });
@@ -390,5 +400,69 @@ describe('sandbox volume service', () => {
     await expect(
       deleteSessionVolume('fastgpt-session-slash', { signal: controller.signal })
     ).rejects.toThrow('lease aborted');
+  });
+
+  it('resizes and inspects PVC details while preserving typed HTTP error statuses', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        claimName: 'fastgpt-session-a-0',
+        resized: true,
+        requestedBytes: 1_073_741_824,
+        capacityBytes: 536_870_912
+      }),
+      text: async () => ''
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      resizeSessionVolume('fastgpt-session-a-0', { storageSize: '1024Mi' })
+    ).resolves.toEqual({
+      claimName: 'fastgpt-session-a-0',
+      resized: true,
+      requestedBytes: 1_073_741_824,
+      capacityBytes: 536_870_912
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'http://volume-manager.local/v1/volumes/fastgpt-session-a-0/resize',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ storageSize: '1024Mi' })
+      })
+    );
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        claimName: 'fastgpt-session-a-0',
+        requestedBytes: 1_073_741_824,
+        capacityBytes: 1_073_741_824,
+        conditions: [{ type: 'Resizing', status: 'True' }]
+      }),
+      text: async () => ''
+    });
+    await expect(inspectSessionVolume('fastgpt-session-a-0')).resolves.toEqual({
+      claimName: 'fastgpt-session-a-0',
+      requestedBytes: 1_073_741_824,
+      capacityBytes: 1_073_741_824,
+      conditions: [{ type: 'Resizing', status: 'True' }]
+    });
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      json: async () => ({}),
+      text: async () => 'expansion not allowed'
+    });
+    await expect(
+      resizeSessionVolume('fastgpt-session-a-0', { storageSize: '1536Mi' })
+    ).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof VolumeManagerHttpError &&
+        err.status === 422 &&
+        err.body === 'expansion not allowed'
+    );
   });
 });

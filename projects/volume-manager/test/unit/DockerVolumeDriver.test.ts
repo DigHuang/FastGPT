@@ -26,26 +26,26 @@ describe('DockerVolumeDriver', () => {
     vi.unstubAllGlobals();
   });
 
-  it('exists inspects volume without creating on 404 and checks ownership labels', async () => {
+  it('inspect checks volume without creating on 404 and verifies ownership labels', async () => {
     const { DockerVolumeDriver } = await import('../../src/drivers/DockerVolumeDriver');
     const driver = new DockerVolumeDriver();
 
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404, text: async () => '' });
-    await expect(driver.exists(VOLUME_NAME)).resolves.toBe(false);
+    await expect(driver.inspect(VOLUME_NAME)).resolves.toBeNull();
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({ Name: VOLUME_NAME, Labels: MANAGED_LABELS })
     });
-    await expect(driver.exists(VOLUME_NAME)).resolves.toBe(true);
+    await expect(driver.inspect(VOLUME_NAME)).resolves.toEqual({ claimName: VOLUME_NAME });
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({ Name: VOLUME_NAME, Labels: null })
     });
-    await expect(driver.exists(VOLUME_NAME)).rejects.toThrow(
+    await expect(driver.inspect(VOLUME_NAME)).rejects.toThrow(
       'missing fastgpt-volume-manager ownership labels'
     );
 
@@ -54,14 +54,16 @@ describe('DockerVolumeDriver', () => {
       status: 200,
       json: async () => ({ Name: VOLUME_NAME, Labels: null })
     });
-    await expect(driver.exists(VOLUME_NAME, { allowLegacyUnlabeled: true })).resolves.toBe(true);
+    await expect(driver.inspect(VOLUME_NAME, { allowLegacyUnlabeled: true })).resolves.toEqual({
+      claimName: VOLUME_NAME
+    });
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({ Name: VOLUME_NAME, Labels: { app: 'other' } })
     });
-    await expect(driver.exists(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
+    await expect(driver.inspect(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
       'missing fastgpt-volume-manager ownership labels'
     );
     expect(fetchMock).toHaveBeenCalledTimes(5);
@@ -193,7 +195,7 @@ describe('DockerVolumeDriver', () => {
         status: 200,
         json: async () => ({ Name: VOLUME_NAME, Labels: foreignLabels })
       });
-      await expect(driver.exists(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
+      await expect(driver.inspect(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
         'Refusing to inspect Docker volume'
       );
     }
@@ -215,5 +217,13 @@ describe('DockerVolumeDriver', () => {
     expect(items).toEqual([VOLUME_NAME]);
     const [url] = fetchMock.mock.calls[0];
     expect(decodeURIComponent(String(url))).toContain('managed-by=fastgpt-volume-manager');
+  });
+
+  it('resize rejects Docker volumes with 400', async () => {
+    const { DockerVolumeDriver } = await import('../../src/drivers/DockerVolumeDriver');
+    const driver = new DockerVolumeDriver();
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).rejects.toMatchObject({
+      status: 400
+    });
   });
 });

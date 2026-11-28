@@ -14,20 +14,23 @@ import {
   type RedisLeaseContext
 } from '@fastgpt/dal/redis/caches';
 import { getErrText } from '@fastgpt/global/common/error/utils';
-import { extractToSandboxDirectory, packSandboxDirectory } from './ideAgent';
+import { extractToSandboxDirectory, getSandboxDiskUsage, packSandboxDirectory } from './ideAgent';
 import { batchRun } from '@fastgpt/global/common/system/utils';
 import { getLogger, LogCategories } from '../../../../common/logger';
 import {
   buildSandboxArchiveObjectKey,
   getS3SandboxSource
 } from '../../../../common/s3/sources/sandbox';
-import { getAgentSandboxCommonConfig } from '../config';
+import { getAgentSandboxCommonConfig, isAgentSandboxDynamicPvcResizeEnabled } from '../config';
 import {
   SANDBOX_ARCHIVE_CONCURRENCY,
   SANDBOX_LEASE_RENEW_INTERVAL_MS,
   SANDBOX_LEASE_TTL_MS,
   SandboxInstanceStatusEnum
 } from '../constants';
+import { isSandboxDiskFullError } from '../infrastructure/opensandbox/errors';
+import { computeArchiveRestoreStorageSize } from './pvcResize/plan';
+import { expandSandboxPvcToMaxCapacity } from './pvcResize/service';
 import {
   createSandboxResourcesToArchiveCursor,
   findSandboxInstanceBySandboxId,
@@ -119,13 +122,27 @@ export async function createAndUploadWorkspaceArchive(params: {
   const { signal, sandbox, sandboxId, excludePatterns } = params;
   const generation = randomUUID().replaceAll('-', '').slice(0, 12);
   const objectKey = buildSandboxArchiveObjectKey(sandboxId, generation);
-  const archiveInfo = (sizeBytes: number): SandboxArchiveInfoType => ({
+  const archiveInfo = (sizeBytes: number, uncompressedBytes?: number): SandboxArchiveInfoType => ({
     objectKey,
     generation,
     format: 'tar.zst',
     sizeBytes,
+    ...(uncompressedBytes !== undefined ? { uncompressedBytes } : {}),
     archivedAt: new Date()
   });
+
+  const dynamicPvcResizeEnabled = isAgentSandboxDynamicPvcResizeEnabled();
+  // 仅在开启 Kubernetes 动态 PVC 扩容时通过 O(1) statvfs 记录占盘字节数（fail-open），供冷恢复一步建足目标容量；未开启时零额外 RPC。
+  const uncompressedBytes = dynamicPvcResizeEnabled
+    ? await getSandboxDiskUsage({
+        sandbox,
+        scope: 'filesystem',
+        maxAttempts: 5,
+        signal
+      })
+        .then((snapshot) => Math.round(snapshot.filesystem?.usedBytes ?? snapshot.usedBytes))
+        .catch(() => undefined)
+    : undefined;
 
   const body = await packSandboxDirectory({
     sandbox,
@@ -133,7 +150,7 @@ export async function createAndUploadWorkspaceArchive(params: {
     assertValid: params.assertValid,
     signal
   });
-  if (!body) return archiveInfo(0);
+  if (!body) return archiveInfo(0, dynamicPvcResizeEnabled ? 0 : undefined);
 
   params.assertValid();
   const { sizeBytes } = await getS3SandboxSource().uploadArchiveStream({
@@ -147,31 +164,56 @@ export async function createAndUploadWorkspaceArchive(params: {
       .catch(() => undefined);
     throw new Error(`Received empty archive stream for sandbox ${sandboxId}`);
   }
-  return archiveInfo(sizeBytes);
+  return archiveInfo(sizeBytes, uncompressedBytes);
 }
 
 /**
  * 把 S3 `.tar.zst` 归档流式解压到新建的空 `$HOME` PVC。
  *
  * 恢复目标总是本次 `restoring` 新分配的空卷，因此空归档无需任何操作；同一阶段重试时重复解压同一归档是幂等的。
+ * 若开启动态 PVC 扩容时因极端压缩比估算偏小导致解压触发 `ENOSPC`，自动在线扩至全局上限 `storageSizeGi` 后重试一次。
  */
 async function restoreWorkspaceArchive(params: {
   sandbox: OpenSandboxClient;
   sandboxId: string;
+  claimName: string;
   archive: SandboxArchiveInfoType;
   assertValid: () => void;
   signal: AbortSignal;
 }) {
-  const { sandbox, sandboxId, archive, signal } = params;
+  const { sandbox, sandboxId, claimName, archive, signal } = params;
   if (archive.sizeBytes === 0) return;
 
-  await extractToSandboxDirectory({
-    sandbox,
-    openBody: () =>
-      getS3SandboxSource().downloadArchiveStream({ key: archive.objectKey, sandboxId, signal }),
-    assertValid: params.assertValid,
-    signal
-  });
+  const extractOnce = () =>
+    extractToSandboxDirectory({
+      sandbox,
+      openBody: () =>
+        getS3SandboxSource().downloadArchiveStream({ key: archive.objectKey, sandboxId, signal }),
+      assertValid: params.assertValid,
+      signal
+    });
+
+  try {
+    await extractOnce();
+  } catch (error) {
+    if (!isAgentSandboxDynamicPvcResizeEnabled() || !isSandboxDiskFullError(error)) {
+      throw error;
+    }
+
+    params.assertValid();
+    const expanded = await expandSandboxPvcToMaxCapacity({
+      sandbox,
+      claimName,
+      signal
+    });
+    if (!expanded) {
+      throw error;
+    }
+
+    params.assertValid();
+    await extractOnce();
+  }
+
   logger.info('Sandbox home restored from .tar.zst archive', {
     sandboxId,
     generation: archive.generation
@@ -502,7 +544,16 @@ export async function restoreArchivedSandboxWithinLease(params: {
                 );
               }
 
-              const vmConfig = await getSessionVolumeConfig(claimName);
+              const restoreStorageSize = isAgentSandboxDynamicPvcResizeEnabled()
+                ? computeArchiveRestoreStorageSize({
+                    maxStorageSizeGi: getAgentSandboxCommonConfig().storageSizeGi,
+                    uncompressedBytes: archive.uncompressedBytes,
+                    archiveSizeBytes: archive.sizeBytes
+                  })
+                : undefined;
+              const vmConfig = restoreStorageSize
+                ? await getSessionVolumeConfig(claimName, { storageSize: restoreStorageSize })
+                : await getSessionVolumeConfig(claimName);
               assertValid();
               sandbox = createRuntimeOpenSandboxClient({
                 sandboxId: claimed.sandboxId,
@@ -514,6 +565,7 @@ export async function restoreArchivedSandboxWithinLease(params: {
               await restoreWorkspaceArchive({
                 sandbox,
                 sandboxId: claimed.sandboxId,
+                claimName,
                 archive,
                 signal: lease.signal,
                 assertValid

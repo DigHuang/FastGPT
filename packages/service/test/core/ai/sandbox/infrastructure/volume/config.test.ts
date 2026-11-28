@@ -33,6 +33,26 @@ describe('sandbox volume config', () => {
       storageSize: '5Gi'
     });
   });
+
+  it('uses 512Mi initial storage size when kubernetes dynamic PVC resize is enabled', async () => {
+    global.systemInstanceConfig = createDefaultInstanceConfig();
+    Object.assign(getTestInstanceConfig().subservice.agentSandbox.opensandbox, {
+      runtime: 'kubernetes',
+      enableDynamicPvcResize: true,
+      volumeManagerUrl: 'http://volume-manager.local',
+      volumeManagerToken: 'volume-token',
+      volumeNamePrefix: 'custom-volume'
+    });
+    getTestInstanceConfig().subservice.agentSandbox.common.storageSizeGi = 5;
+
+    const { getVolumeManagerEnvConfig } = await loadVolumeConfigModule();
+    expect(getVolumeManagerEnvConfig().storageSize).toBe('512Mi');
+
+    // Docker 运行时不受 enableDynamicPvcResize 影响，仍保持原值
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.runtime = 'docker';
+    expect(getVolumeManagerEnvConfig().storageSize).toBe('5Gi');
+  });
+
   it('requires the volume-manager URL at the configuration boundary', async () => {
     global.systemInstanceConfig = createDefaultInstanceConfig();
     const { getVolumeManagerEnvConfig } = await loadVolumeConfigModule();

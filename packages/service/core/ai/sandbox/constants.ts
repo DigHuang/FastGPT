@@ -154,3 +154,21 @@ export const SESSION_VOLUME_GENERATION_LENGTH = 8;
 export const MANAGED_SESSION_VOLUME_CLAIM_REST_RE = new RegExp(
   `^(.+)-(?:0|[0-9a-f]{${SESSION_VOLUME_GENERATION_LENGTH}})$`
 );
+
+// Kubernetes 动态 PVC 扩容策略（按 0.5Gi = 512Mi 整数倍起卷与扩容，上限封顶为 storageSizeGi）
+export const SANDBOX_PVC_RESIZE_INITIAL_MIB = 512;
+export const SANDBOX_PVC_RESIZE_STEP_MIB = 512;
+export const SANDBOX_PVC_RESIZE_USAGE_RATIO_THRESHOLD = 0.8;
+export const SANDBOX_PVC_RESIZE_MIN_AVAILABLE_BYTES = 200 * 1024 * 1024;
+export const SANDBOX_PVC_RESIZE_WAIT_TIMEOUT_MS = 10_000;
+/**
+ * 阻塞型扩容等待上限（90s）：用于已知待写入 `incomingBytes > availableBytes` 或冷归档 `ENOSPC` 重试等
+ * 不等待生效则必然失败的场景，覆盖标准 Kubernetes kubelet 默认 60s 卷同步周期（`NodeExpandVolume`）。
+ */
+export const SANDBOX_PVC_RESIZE_BLOCKING_WAIT_TIMEOUT_MS = 90_000;
+export const SANDBOX_PVC_RESIZE_POLL_INTERVAL_MS = 300;
+export const SANDBOX_PVC_RESIZE_BLOCKING_POLL_INTERVAL_MS = 1_000;
+export const SANDBOX_PVC_RESIZE_FAILURE_COOLDOWN_MS = 30_000;
+export const SANDBOX_PVC_RESIZE_EFFECTIVE_DELTA_BYTES = 32 * 1024 * 1024;
+/** 历史归档缺少 `uncompressedBytes` 时，按 `.tar.zst` 常见工作区压缩率估算解压占盘大小的保守倍率。 */
+export const SANDBOX_ARCHIVE_FALLBACK_COMPRESSION_RATIO = 4;

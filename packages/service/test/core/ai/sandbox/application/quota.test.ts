@@ -30,7 +30,7 @@ import {
   assertSandboxWorkspaceWritable,
   checkSandboxQuota,
   formatAgentDiskQuotaNotice,
-  getSandboxDiskQuotaStatus
+  prepareSandboxDiskForWrite
 } from '@fastgpt/service/core/ai/sandbox/application/quota';
 
 const identity = {
@@ -161,7 +161,7 @@ describe('docker disk soft-limit quota', () => {
     getTestInstanceConfig().subservice.agentSandbox.opensandbox.runtime = 'kubernetes';
     const sandbox = createMockSandbox();
 
-    await expect(getSandboxDiskQuotaStatus(sandbox)).resolves.toMatchObject({
+    await expect(prepareSandboxDiskForWrite(sandbox)).resolves.toMatchObject({
       enabled: false,
       exceeded: false
     });
@@ -215,7 +215,7 @@ describe('docker disk soft-limit quota', () => {
 
     // 探针失败时 fail-open 放行。
     fetchMock.mockRejectedValueOnce(new Error('timeout'));
-    await expect(getSandboxDiskQuotaStatus(sandbox)).resolves.toMatchObject({
+    await expect(prepareSandboxDiskForWrite(sandbox)).resolves.toMatchObject({
       enabled: true,
       exceeded: false
     });
@@ -232,7 +232,7 @@ describe('docker disk soft-limit quota', () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ usedBytes, limitBytes: gib }), { status: 200 })
     );
-    await expect(getSandboxDiskQuotaStatus(sandbox)).resolves.toEqual({
+    await expect(prepareSandboxDiskForWrite(sandbox)).resolves.toEqual({
       enabled: true,
       exceeded: true,
       usedBytes,
@@ -244,7 +244,7 @@ describe('docker disk soft-limit quota', () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ usedBytes, limitBytes: 2 * gib }), { status: 200 })
     );
-    await expect(getSandboxDiskQuotaStatus(sandbox)).resolves.toEqual({
+    await expect(prepareSandboxDiskForWrite(sandbox)).resolves.toEqual({
       enabled: true,
       exceeded: false,
       usedBytes,
@@ -255,7 +255,7 @@ describe('docker disk soft-limit quota', () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ usedBytes, limitBytes: null }), { status: 200 })
     );
-    await expect(getSandboxDiskQuotaStatus(sandbox)).resolves.toEqual({
+    await expect(prepareSandboxDiskForWrite(sandbox)).resolves.toEqual({
       enabled: true,
       exceeded: true,
       usedBytes,

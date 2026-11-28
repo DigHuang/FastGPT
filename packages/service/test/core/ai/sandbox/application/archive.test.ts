@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getSessionVolumeClaimName: vi.fn(),
   getSessionVolumeConfig: vi.fn(),
   deleteSessionVolume: vi.fn(),
+  resizeSessionVolume: vi.fn(),
   getEndpoint: vi.fn(),
   uploadArchiveStream: vi.fn(),
   downloadArchiveStream: vi.fn(),
@@ -92,7 +93,8 @@ vi.mock('@fastgpt/service/core/ai/sandbox/infrastructure/volume/service', () => 
   createSessionVolumeClaimName: mocks.createSessionVolumeClaimName,
   deleteSessionVolume: mocks.deleteSessionVolume,
   getSessionVolumeClaimName: mocks.getSessionVolumeClaimName,
-  getSessionVolumeConfig: mocks.getSessionVolumeConfig
+  getSessionVolumeConfig: mocks.getSessionVolumeConfig,
+  resizeSessionVolume: mocks.resizeSessionVolume
 }));
 
 vi.mock('@fastgpt/service/common/s3/sources/sandbox', () => ({
@@ -871,5 +873,103 @@ describe('sandbox archive lifecycle', () => {
 
     await expect(restoreSandbox()).rejects.toThrow('No space left on device (os error 28)');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('records uncompressedBytes on archive and expands legacy archive PVC on ENOSPC retry under K8s dynamic resize', async () => {
+    const MIB = 1024 * 1024;
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.runtime = 'kubernetes';
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.enableDynamicPvcResize = true;
+    getTestInstanceConfig().subservice.agentSandbox.common.storageSizeGi = 3;
+
+    const fsResponse = (totalMiB: number, usedMiB: number) =>
+      new Response(
+        JSON.stringify({
+          usedBytes: usedMiB * MIB,
+          limitBytes: null,
+          filesystem: {
+            totalBytes: totalMiB * MIB,
+            usedBytes: usedMiB * MIB,
+            availableBytes: Math.max(0, (totalMiB - usedMiB) * MIB)
+          }
+        }),
+        { status: 200 }
+      );
+
+    // 1. 打包归档前记录 statvfs.usedBytes 为 uncompressedBytes
+    fetchSpy.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.endsWith('/disk-usage?scope=filesystem')) {
+        return fsResponse(488, 350.4);
+      }
+      if (target.endsWith('/archive/pack')) {
+        return new Response(
+          Readable.toWeb(Readable.from([Buffer.from('zstd-archive-bytes')])) as BodyInit,
+          { status: 200, headers: { 'content-type': 'application/zstd' } }
+        );
+      }
+      return new Response('unexpected', { status: 500 });
+    });
+
+    await expect(
+      archiveSandboxResource(createResource(), new Date('2026-07-10T00:00:00.000Z'))
+    ).resolves.toMatchObject({ status: 'success' });
+    expect(mocks.advanceSandboxOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'archiveUploaded',
+        set: expect.objectContaining({
+          storage: expect.objectContaining({
+            archive: expect.objectContaining({ uncompressedBytes: Math.round(350.4 * MIB) })
+          })
+        })
+      })
+    );
+
+    // 2. 老归档无 uncompressedBytes 按 4 倍估算（100Mi*4 + 200Mi -> 1024Mi），解压遇 ENOSPC 扩至上限后重试成功
+    const legacyArchive = { ...defaultArchive, sizeBytes: 100 * MIB };
+    mocks.createRuntimeOpenSandboxClient.mockReturnValueOnce(createRuntimeSandbox());
+    mocks.findSandboxInstanceBySandboxId.mockResolvedValue(
+      createResource('archived', { storage: { archive: legacyArchive } })
+    );
+    mocks.completeSandboxOperation.mockResolvedValueOnce(createResource('running'));
+    mocks.resizeSessionVolume.mockResolvedValueOnce({
+      claimName: 'fastgpt-session-sandbox-1-new',
+      resized: true,
+      requestedBytes: 3072 * MIB
+    });
+
+    let extractAttempts = 0;
+    let diskProbeAttempts = 0;
+    fetchSpy.mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.endsWith('/archive/extract')) {
+        await drainWebStream(init?.body);
+        extractAttempts += 1;
+        return extractAttempts === 1
+          ? new Response('No space left on device (os error 28)', { status: 500 })
+          : new Response(null, { status: 204 });
+      }
+      if (target.endsWith('/disk-usage?scope=filesystem')) {
+        diskProbeAttempts += 1;
+        return fsResponse(diskProbeAttempts === 1 ? 990 : 2980, 950);
+      }
+      return new Response('unexpected', { status: 500 });
+    });
+
+    await expect(
+      restoreArchivedSandboxWithinLease({
+        resource: createResource('archived', { storage: { archive: legacyArchive } }),
+        lease
+      })
+    ).resolves.toMatchObject({ status: 'running' });
+
+    expect(mocks.getSessionVolumeConfig).toHaveBeenCalledWith('fastgpt-session-sandbox-1-new', {
+      storageSize: '1024Mi'
+    });
+    expect(mocks.resizeSessionVolume).toHaveBeenCalledWith('fastgpt-session-sandbox-1-new', {
+      storageSize: '3072Mi',
+      signal: lease.signal
+    });
+    expect(extractAttempts).toBe(2);
+    expect(mocks.downloadArchiveStream).toHaveBeenCalledTimes(2);
   });
 });

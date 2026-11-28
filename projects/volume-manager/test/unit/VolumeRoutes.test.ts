@@ -47,8 +47,9 @@ describe('volume-manager HTTP routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     driver = {
-      exists: vi.fn(),
+      inspect: vi.fn(),
       ensure: vi.fn(),
+      resize: vi.fn(),
       remove: vi.fn(),
       list: vi.fn()
     };
@@ -79,21 +80,65 @@ describe('volume-manager HTTP routes', () => {
     });
     expect(badNameRes.status).toBe(400);
 
-    vi.mocked(driver.exists).mockResolvedValueOnce(false);
+    vi.mocked(driver.inspect).mockResolvedValueOnce(null);
     const missingRes = await app.request(`/v1/volumes/${CLAIM_NAME}`, {
       headers: AUTH_HEADERS
     });
     expect(missingRes.status).toBe(404);
-    expect(driver.exists).toHaveBeenCalledWith(CLAIM_NAME);
+    expect(driver.inspect).toHaveBeenCalledWith(CLAIM_NAME);
 
-    vi.mocked(driver.exists).mockResolvedValueOnce(true);
+    vi.mocked(driver.inspect).mockResolvedValueOnce({
+      claimName: CLAIM_NAME,
+      requestedBytes: 536_870_912,
+      capacityBytes: 536_870_912
+    });
     const legacyOkRes = await app.request(`/v1/volumes/${CLAIM_NAME}?allowLegacyUnlabeled=true`, {
       headers: AUTH_HEADERS
     });
     expect(legacyOkRes.status).toBe(200);
-    await expect(legacyOkRes.json()).resolves.toEqual({ claimName: CLAIM_NAME });
-    expect(driver.exists).toHaveBeenLastCalledWith(CLAIM_NAME, { allowLegacyUnlabeled: true });
+    await expect(legacyOkRes.json()).resolves.toEqual({
+      claimName: CLAIM_NAME,
+      requestedBytes: 536_870_912,
+      capacityBytes: 536_870_912
+    });
+    expect(driver.inspect).toHaveBeenLastCalledWith(CLAIM_NAME, { allowLegacyUnlabeled: true });
     expect(driver.ensure).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /v1/volumes/:claimName/resize validates params and forwards resize payload', async () => {
+    const badNameRes = await app.request('/v1/volumes/INVALID_NAME/resize', {
+      method: 'PATCH',
+      headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storageSize: '1024Mi' })
+    });
+    expect(badNameRes.status).toBe(400);
+
+    const badBodyRes = await app.request(`/v1/volumes/${CLAIM_NAME}/resize`, {
+      method: 'PATCH',
+      headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    expect(badBodyRes.status).toBe(400);
+
+    vi.mocked(driver.resize).mockResolvedValueOnce({
+      claimName: CLAIM_NAME,
+      resized: true,
+      requestedBytes: 1_073_741_824,
+      capacityBytes: 536_870_912
+    });
+    const okRes = await app.request(`/v1/volumes/${CLAIM_NAME}/resize`, {
+      method: 'PATCH',
+      headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storageSize: '1024Mi' })
+    });
+    expect(okRes.status).toBe(200);
+    await expect(okRes.json()).resolves.toEqual({
+      claimName: CLAIM_NAME,
+      resized: true,
+      requestedBytes: 1_073_741_824,
+      capacityBytes: 536_870_912
+    });
+    expect(driver.resize).toHaveBeenCalledWith(CLAIM_NAME, { storageSize: '1024Mi' });
   });
 
   it('POST /v1/volumes/ensure forwards claimName and storageSize', async () => {
@@ -150,7 +195,7 @@ describe('volume-manager HTTP routes', () => {
         403,
         'forbidden label',
         () => {
-          vi.mocked(driver.exists).mockRejectedValueOnce(
+          vi.mocked(driver.inspect).mockRejectedValueOnce(
             new HTTPException(403, { message: 'forbidden label' })
           );
           return app.request(`/v1/volumes/${CLAIM_NAME}`, { headers: AUTH_HEADERS });
@@ -198,7 +243,7 @@ describe('volume-manager HTTP routes', () => {
   it('logs expected 4xx HTTPException at warn level and 5xx/unexpected errors at error level', async () => {
     const { HTTPException } = await import('hono/http-exception');
 
-    vi.mocked(driver.exists).mockRejectedValueOnce(
+    vi.mocked(driver.inspect).mockRejectedValueOnce(
       new HTTPException(403, { message: 'forbidden label' })
     );
     const res403 = await app.request(`/v1/volumes/${CLAIM_NAME}`, { headers: AUTH_HEADERS });

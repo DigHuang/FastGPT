@@ -255,6 +255,7 @@ mod tests {
         assert_eq!(authorized_preview.status(), StatusCode::NOT_FOUND);
 
         let authorized_disk = router
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/disk-usage?refresh=1")
@@ -270,5 +271,29 @@ mod tests {
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert!(parsed["usedBytes"].is_u64());
+        assert!(parsed.get("filesystem").is_none());
+
+        let filesystem_only = router
+            .oneshot(
+                Request::builder()
+                    .uri("/disk-usage?scope=filesystem")
+                    .header(AGENT_TOKEN_HEADER, "expected-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(filesystem_only.status(), StatusCode::OK);
+        let fs_body_bytes = axum::body::to_bytes(filesystem_only.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let fs_parsed: serde_json::Value = serde_json::from_slice(&fs_body_bytes).unwrap();
+        assert!(fs_parsed["usedBytes"].is_u64());
+        #[cfg(unix)]
+        {
+            assert!(fs_parsed["filesystem"]["totalBytes"].as_u64().unwrap() > 0);
+            assert!(fs_parsed["filesystem"]["availableBytes"].is_u64());
+            assert!(fs_parsed["filesystem"]["usedBytes"].is_u64());
+        }
     }
 }

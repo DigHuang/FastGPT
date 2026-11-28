@@ -32,15 +32,27 @@ pub struct DiskQuotaExceeded {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FilesystemUsage {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+    pub used_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiskUsageSnapshot {
     pub used_bytes: u64,
     pub limit_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesystem: Option<FilesystemUsage>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct DiskUsageQuery {
     #[serde(default)]
     refresh: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 struct CacheState {
@@ -105,6 +117,48 @@ pub fn disk_soft_limit_bytes() -> Option<u64> {
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
+}
+
+/// 通过 O(1) `statvfs` 查询挂载点所在文件系统的真实容量与非特权用户可用空间（用于 K8s PVC 动态扩容水位判断与生效确认）。
+#[cfg(unix)]
+pub fn measure_filesystem_usage(root: &Path) -> io::Result<Option<FilesystemUsage>> {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = CString::new(root.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL"))?;
+    let mut stat = MaybeUninit::<libc::statvfs>::zeroed();
+    let ret = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let stat = unsafe { stat.assume_init() };
+
+    #[allow(clippy::unnecessary_cast)]
+    let block_size = if stat.f_frsize > 0 {
+        stat.f_frsize as u64
+    } else {
+        stat.f_bsize as u64
+    };
+    #[allow(clippy::unnecessary_cast)]
+    let total_bytes = (stat.f_blocks as u64).saturating_mul(block_size);
+    #[allow(clippy::unnecessary_cast)]
+    let free_bytes = (stat.f_bfree as u64).saturating_mul(block_size);
+    #[allow(clippy::unnecessary_cast)]
+    let available_bytes = (stat.f_bavail as u64).saturating_mul(block_size);
+    let used_bytes = total_bytes.saturating_sub(free_bytes);
+
+    Ok(Some(FilesystemUsage {
+        total_bytes,
+        available_bytes,
+        used_bytes,
+    }))
+}
+
+#[cfg(not(unix))]
+pub fn measure_filesystem_usage(_root: &Path) -> io::Result<Option<FilesystemUsage>> {
+    Ok(None)
 }
 
 /// 递归统计单个挂载卷根目录的实际占盘字节数（`lstat` 不跟随软链，Unix 下按 `blocks * 512` 计量并对硬链接去重）。
@@ -215,24 +269,32 @@ pub async fn check_workspace_writable_with_limit(
     check_writable_at(get_home_root().to_path_buf(), &DISK_USAGE_CACHE, limit).await
 }
 
-/// `GET /disk-usage`（1319 HTTP，受 `x-fastgpt-agent-token` 保护），支持 `?refresh=1`。
+/// `GET /disk-usage`（1319 HTTP，受 `x-fastgpt-agent-token` 保护），支持 `?refresh=1` 与 `?scope=filesystem`（O(1) `statvfs`，不扫目录树）。
 pub async fn disk_usage_handler(Query(query): Query<DiskUsageQuery>) -> Response<Body> {
     let limit = disk_soft_limit_bytes();
-    let refresh = matches!(query.refresh.as_deref(), Some("1" | "true"));
-    match measure_cached_usage(
-        get_home_root().to_path_buf(),
-        &DISK_USAGE_CACHE,
-        limit,
-        refresh,
-    )
-    .await
-    .and_then(|used_bytes| {
-        serde_json::to_string(&DiskUsageSnapshot {
-            used_bytes,
+    let home_root = get_home_root().to_path_buf();
+    let is_filesystem_only = matches!(query.scope.as_deref(), Some("filesystem"));
+
+    let snapshot_result: io::Result<DiskUsageSnapshot> = if is_filesystem_only {
+        measure_filesystem_usage(&home_root).map(|filesystem| DiskUsageSnapshot {
+            used_bytes: filesystem.map(|fs| fs.used_bytes).unwrap_or(0),
             limit_bytes: limit,
+            filesystem,
         })
-        .map_err(io::Error::other)
-    }) {
+    } else {
+        let refresh = matches!(query.refresh.as_deref(), Some("1" | "true"));
+        measure_cached_usage(home_root, &DISK_USAGE_CACHE, limit, refresh)
+            .await
+            .map(|used_bytes| DiskUsageSnapshot {
+                used_bytes,
+                limit_bytes: limit,
+                filesystem: None,
+            })
+    };
+
+    match snapshot_result
+        .and_then(|snapshot| serde_json::to_string(&snapshot).map_err(io::Error::other))
+    {
         Ok(payload) => (
             StatusCode::OK,
             [
@@ -333,5 +395,15 @@ mod tests {
         cache.invalidate();
         cache.set_if_generation(64 * 1024, stale_gen);
         assert!(cache.get_usable(Some(16 * 1024)).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn measures_filesystem_statvfs_capacity_and_availability() {
+        let dir = tempfile::tempdir().unwrap();
+        let fs_usage = measure_filesystem_usage(dir.path()).unwrap().unwrap();
+        assert!(fs_usage.total_bytes > 0);
+        assert!(fs_usage.available_bytes <= fs_usage.total_bytes);
+        assert!(fs_usage.used_bytes <= fs_usage.total_bytes);
     }
 }

@@ -21,9 +21,34 @@ export const SandboxVolumeEnsureResponseSchema = z.object({
 });
 export type SandboxVolumeEnsureResponse = z.infer<typeof SandboxVolumeEnsureResponseSchema>;
 
-export const SandboxVolumeInspectResponseSchema = z.object({
-  claimName: SandboxVolumeNameSchema
+export const SandboxVolumePvcConditionSchema = z.object({
+  type: z.string(),
+  status: z.string(),
+  reason: z.string().optional(),
+  message: z.string().optional()
 });
+export type SandboxVolumePvcCondition = z.infer<typeof SandboxVolumePvcConditionSchema>;
+
+export const SandboxVolumeInspectResponseSchema = z.object({
+  claimName: SandboxVolumeNameSchema,
+  requestedBytes: z.number().nonnegative().optional(),
+  capacityBytes: z.number().nonnegative().optional(),
+  conditions: z.array(SandboxVolumePvcConditionSchema).optional()
+});
+export type SandboxVolumeInspectResponse = z.infer<typeof SandboxVolumeInspectResponseSchema>;
+
+export const SandboxVolumeResizeRequestSchema = z.object({
+  storageSize: z.string().trim().min(1).max(64)
+});
+export type SandboxVolumeResizeRequest = z.infer<typeof SandboxVolumeResizeRequestSchema>;
+
+export const SandboxVolumeResizeResponseSchema = z.object({
+  claimName: SandboxVolumeNameSchema,
+  resized: z.boolean(),
+  requestedBytes: z.number().nonnegative().optional(),
+  capacityBytes: z.number().nonnegative().optional()
+});
+export type SandboxVolumeResizeResponse = z.infer<typeof SandboxVolumeResizeResponseSchema>;
 
 export const SandboxVolumeListResponseSchema = z.object({
   items: z.array(SandboxVolumeNameSchema)

@@ -43,7 +43,13 @@ async function handler(
 
   const maxFileBytes = getAgentSandboxDiskBytes();
   const contentLengthHeader = req.headers['content-length'];
-  const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
+  const parsedContentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
+  const contentLength =
+    parsedContentLength !== undefined &&
+    Number.isFinite(parsedContentLength) &&
+    parsedContentLength > 0
+      ? parsedContentLength
+      : undefined;
   const createFileTooLargeError = () => new ApiHttpError(413, 'File exceeds maximum allowed size');
 
   if (contentLength !== undefined && contentLength > maxFileBytes) {
@@ -61,7 +67,10 @@ async function handler(
 
   const providerPath = sandbox.resolveRuntimePath(path, { allowAbsolutePath: true });
   await sandbox.runWithRecovery(async () => {
-    await assertSandboxWorkspaceWritable(sandbox.opensandbox, { rethrowRecoverable: true });
+    await assertSandboxWorkspaceWritable(sandbox.opensandbox, {
+      rethrowRecoverable: true,
+      ...(contentLength !== undefined ? { incomingBytes: contentLength } : {})
+    });
     await prepareSandboxFileParentDirectories(sandbox.opensandbox, [providerPath]).catch(
       rethrowSandboxDiskQuotaExceededError
     );

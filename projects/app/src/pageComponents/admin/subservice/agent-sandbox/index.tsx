@@ -23,6 +23,7 @@ import AdminSwitchRow from '@/pageComponents/admin/settings/AdminSwitchRow';
 import ConnectivityTestInput from '@/pageComponents/admin/settings/ConnectivityTestInput';
 import ConnectivityTestGroup from '@/pageComponents/admin/settings/ConnectivityTestGroup';
 import type { SettingTOCItem } from '@/pageComponents/admin/settings/AdminSettingTOC';
+import SandboxPvcResizeTestBar from './SandboxPvcResizeTestBar';
 import { isValidHttpUrl, isValidServiceBaseUrl } from '@fastgpt/global/common/string/url';
 import {
   AgentSandboxProxyConfigSchema,
@@ -453,6 +454,13 @@ url = "http://proxy.corp.local:3128"
                       )}
                     />
                   </AdminFormItem>
+                  <SandboxPvcResizeTestBar
+                    control={control}
+                    openSandboxApiKey={openSandboxApiKey}
+                    isOpenSandboxApiKeyConfigured={isOpenSandboxApiKeyConfigured}
+                    volumeManagerToken={volumeManagerToken}
+                    isVolumeManagerTokenConfigured={isVolumeManagerTokenConfigured}
+                  />
                 </>
               )}
 

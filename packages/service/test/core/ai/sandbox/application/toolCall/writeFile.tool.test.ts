@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sandboxWriteFileTool } from '@fastgpt/service/core/ai/sandbox/application/toolCall/writeFile.tool';
 import { createToolRunner } from '@fastgpt/service/core/ai/sandbox/application/toolCall/type';
+import * as quotaModule from '@fastgpt/service/core/ai/sandbox/application/quota';
 import { ChatSourceTypeEnum } from '@fastgpt/global/core/chat/constants';
 
 const createSandboxInstance = () =>
@@ -20,24 +21,39 @@ const createSandboxInstance = () =>
   }) as any;
 
 describe('sandboxWriteFileTool', () => {
-  it('writes files through createToolRunner inside runWithRecovery', async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('writes files through createToolRunner inside runWithRecovery and forwards UTF-8 incomingBytes to prepareSandboxDiskForWrite', async () => {
+    const prepareSpy = vi.spyOn(quotaModule, 'prepareSandboxDiskForWrite').mockResolvedValueOnce({
+      enabled: false,
+      exceeded: false,
+      usedBytes: 0,
+      limitBytes: 1024 * 1024 * 1024
+    });
     const sandbox = createSandboxInstance();
 
     await expect(
       createToolRunner(sandboxWriteFileTool)({
         sandboxInstance: sandbox,
-        input: { path: '/workspace/a.txt', content: 'hello' }
+        input: { path: '/workspace/a.txt', content: '你好a' }
       })
     ).resolves.toEqual({
       success: true,
-      input: { path: '/workspace/a.txt', content: 'hello' },
+      input: { path: '/workspace/a.txt', content: '你好a' },
       response: 'File written successfully: /workspace/a.txt'
     });
 
+    expect(prepareSpy).toHaveBeenCalledWith(sandbox.opensandbox, {
+      rethrowRecoverable: true,
+      signal: undefined,
+      incomingBytes: Buffer.byteLength('你好a', 'utf8')
+    });
     expect(sandbox.runWithRecovery).toHaveBeenCalledWith(expect.any(Function), undefined);
     expect(sandbox.ensureAvailable).not.toHaveBeenCalled();
     expect(sandbox.opensandbox.writeFiles).toHaveBeenCalledWith([
-      { path: '/workspace/a.txt', data: 'hello' }
+      { path: '/workspace/a.txt', data: '你好a' }
     ]);
   });
 

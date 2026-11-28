@@ -28,8 +28,9 @@ describe('volume-manager shutdown log flush', () => {
     await configureLogger();
 
     const driver: IVolumeDriver = {
-      exists: vi.fn(),
+      inspect: vi.fn(),
       ensure: vi.fn(),
+      resize: vi.fn(),
       remove: vi.fn(),
       list: vi.fn().mockRejectedValueOnce(new Error('boom-500'))
     };

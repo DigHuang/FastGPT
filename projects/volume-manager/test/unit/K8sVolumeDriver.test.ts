@@ -22,24 +22,44 @@ describe('K8sVolumeDriver', () => {
 
   const pvcResponse = ({
     uid,
+    resourceVersion,
     deletionTimestamp,
     labels = {
       app: 'fastgpt',
       'managed-by': 'fastgpt-volume-manager'
-    }
+    },
+    requestedStorage,
+    capacityStorage,
+    conditions
   }: {
     uid: string;
+    resourceVersion?: string;
     deletionTimestamp?: string;
     labels?: Record<string, string> | null;
+    requestedStorage?: string;
+    capacityStorage?: string;
+    conditions?: Array<{ type: string; status: string; reason?: string; message?: string }>;
   }) => ({
     ok: true,
     status: 200,
     json: async () => ({
       metadata: {
         uid,
+        ...(resourceVersion ? { resourceVersion } : {}),
         ...(labels ? { labels } : {}),
         ...(deletionTimestamp ? { deletionTimestamp } : {})
-      }
+      },
+      ...(requestedStorage
+        ? { spec: { resources: { requests: { storage: requestedStorage } } } }
+        : {}),
+      ...(capacityStorage || conditions
+        ? {
+            status: {
+              ...(capacityStorage ? { capacity: { storage: capacityStorage } } : {}),
+              ...(conditions ? { conditions } : {})
+            }
+          }
+        : {})
     })
   });
   const notFoundResponse = () => ({ ok: false, status: 404, text: async () => '' });
@@ -58,31 +78,33 @@ describe('K8sVolumeDriver', () => {
     vi.unstubAllGlobals();
   });
 
-  it('exists inspects PVC without creating and treats absent/deleting as false', async () => {
+  it('inspect checks PVC without creating and treats absent/deleting as null', async () => {
     const { K8sVolumeDriver } = await import('../../src/drivers/K8sVolumeDriver');
     const driver = new K8sVolumeDriver();
 
     fetchMock.mockResolvedValueOnce(notFoundResponse());
-    await expect(driver.exists(VOLUME_NAME)).resolves.toBe(false);
+    await expect(driver.inspect(VOLUME_NAME)).resolves.toBeNull();
 
     fetchMock.mockResolvedValueOnce(
       pvcResponse({ uid: 'uid-deleting', deletionTimestamp: '2026-07-30T00:00:00Z' })
     );
-    await expect(driver.exists(VOLUME_NAME)).resolves.toBe(false);
+    await expect(driver.inspect(VOLUME_NAME)).resolves.toBeNull();
 
     fetchMock.mockResolvedValueOnce(pvcResponse({ uid: 'uid-active' }));
-    await expect(driver.exists(VOLUME_NAME)).resolves.toBe(true);
+    await expect(driver.inspect(VOLUME_NAME)).resolves.toEqual({ claimName: VOLUME_NAME });
 
     fetchMock.mockResolvedValueOnce(pvcResponse({ uid: 'uid-legacy', labels: null }));
-    await expect(driver.exists(VOLUME_NAME)).rejects.toThrow(
+    await expect(driver.inspect(VOLUME_NAME)).rejects.toThrow(
       'missing fastgpt-volume-manager ownership labels'
     );
 
     fetchMock.mockResolvedValueOnce(pvcResponse({ uid: 'uid-legacy', labels: null }));
-    await expect(driver.exists(VOLUME_NAME, { allowLegacyUnlabeled: true })).resolves.toBe(true);
+    await expect(driver.inspect(VOLUME_NAME, { allowLegacyUnlabeled: true })).resolves.toEqual({
+      claimName: VOLUME_NAME
+    });
 
     fetchMock.mockResolvedValueOnce(pvcResponse({ uid: 'uid-foreign', labels: { app: 'other' } }));
-    await expect(driver.exists(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
+    await expect(driver.inspect(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
       'missing fastgpt-volume-manager ownership labels'
     );
     expect(fetchMock).toHaveBeenCalledTimes(6);
@@ -430,9 +452,210 @@ describe('K8sVolumeDriver', () => {
     ];
     for (const foreignLabels of foreignLabelCases) {
       fetchMock.mockResolvedValueOnce(pvcResponse({ uid: 'uid-foreign', labels: foreignLabels }));
-      await expect(driver.exists(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
+      await expect(driver.inspect(VOLUME_NAME, { allowLegacyUnlabeled: true })).rejects.toThrow(
         'missing fastgpt-volume-manager ownership labels'
       );
     }
+  });
+
+  it('inspect returns PVC storage request, capacity, and conditions', async () => {
+    const { K8sVolumeDriver } = await import('../../src/drivers/K8sVolumeDriver');
+    const driver = new K8sVolumeDriver();
+
+    fetchMock.mockResolvedValueOnce(
+      pvcResponse({
+        uid: 'uid-bound',
+        requestedStorage: '512Mi',
+        capacityStorage: '512Mi',
+        conditions: [{ type: 'Resizing', status: 'True', message: 'expanding' }]
+      })
+    );
+
+    await expect(driver.inspect(VOLUME_NAME)).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      requestedBytes: 512 * 1024 * 1024,
+      capacityBytes: 512 * 1024 * 1024,
+      conditions: [{ type: 'Resizing', status: 'True', message: 'expanding' }]
+    });
+  });
+
+  it('resize patches PVC storage monotonically, stays idempotent, and propagates 403/422 errors', async () => {
+    const { K8sVolumeDriver } = await import('../../src/drivers/K8sVolumeDriver');
+    const driver = new K8sVolumeDriver();
+    const MIB = 1024 * 1024;
+
+    // 1. 合法扩容：512Mi -> 1024Mi
+    fetchMock
+      .mockResolvedValueOnce(
+        pvcResponse({ uid: 'uid-1', requestedStorage: '512Mi', capacityStorage: '512Mi' })
+      )
+      .mockResolvedValueOnce(
+        pvcResponse({ uid: 'uid-1', requestedStorage: '1024Mi', capacityStorage: '512Mi' })
+      );
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      resized: true,
+      requestedBytes: 1024 * MIB,
+      capacityBytes: 512 * MIB
+    });
+    const [, patchInit] = fetchMock.mock.calls[1];
+    expect((patchInit as RequestInit).method).toBe('PATCH');
+    expect((patchInit as RequestInit).headers).toMatchObject({
+      'Content-Type': 'application/merge-patch+json'
+    });
+    expect(JSON.parse(String((patchInit as RequestInit).body))).toEqual({
+      spec: { resources: { requests: { storage: '1024Mi' } } }
+    });
+
+    // 2. 幂等 / 禁止缩容：当前已是 1Gi（1024Mi），再请求 1024Mi 或 512Mi 直接跳过 PATCH
+    fetchMock.mockResolvedValueOnce(
+      pvcResponse({ uid: 'uid-1', requestedStorage: '1Gi', capacityStorage: '1Gi' })
+    );
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '512Mi' })).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      resized: false,
+      requestedBytes: 1024 * MIB,
+      capacityBytes: 1024 * MIB
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // 3. PATCH 2xx 响应体无法按 PVC 解析时不混入 PATCH 前的旧 capacityBytes
+    fetchMock
+      .mockResolvedValueOnce(
+        pvcResponse({ uid: 'uid-1', requestedStorage: '512Mi', capacityStorage: '512Mi' })
+      )
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      resized: true,
+      requestedBytes: 1024 * MIB
+    });
+
+    // 4. 缺 RBAC patch 权限（403）与 StorageClass 不支持扩容（422）保留状态码
+    fetchMock
+      .mockResolvedValueOnce(pvcResponse({ uid: 'uid-1', requestedStorage: '512Mi' }))
+      .mockResolvedValueOnce(errorResponse(403, 'forbidden patch'));
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).rejects.toMatchObject({
+      status: 403
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(pvcResponse({ uid: 'uid-1', requestedStorage: '512Mi' }))
+      .mockResolvedValueOnce(errorResponse(422, 'only dynamically provisioned pvc can be resized'));
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).rejects.toMatchObject({
+      status: 422
+    });
+
+    // 4b. 支持 K8s DecimalExponent 科学计数法（如 1e9、5e8）
+    fetchMock.mockResolvedValueOnce(
+      pvcResponse({ uid: 'uid-1', requestedStorage: '1e9', capacityStorage: '1e9' })
+    );
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '5e8' })).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      resized: false,
+      requestedBytes: 1_000_000_000,
+      capacityBytes: 1_000_000_000
+    });
+
+    // 5. 非法容量格式 / 缺失 PVC / 删除中 PVC 拒绝扩容
+    for (const invalidSize of ['invalid', '512K', '1Ei', '1e400']) {
+      await expect(driver.resize(VOLUME_NAME, { storageSize: invalidSize })).rejects.toMatchObject({
+        status: 400
+      });
+    }
+    fetchMock.mockResolvedValueOnce(notFoundResponse());
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).rejects.toMatchObject({
+      status: 404
+    });
+    fetchMock.mockResolvedValueOnce(
+      pvcResponse({ uid: 'uid-1', deletionTimestamp: '2026-07-30T00:00:00Z' })
+    );
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1024Mi' })).rejects.toMatchObject({
+      status: 409
+    });
+  });
+
+  it('uses metadata.resourceVersion optimistic concurrency on resize PATCH and retries 409 conflicts monotonically', async () => {
+    const { K8sVolumeDriver } = await import('../../src/drivers/K8sVolumeDriver');
+    const driver = new K8sVolumeDriver();
+    const MIB = 1024 * 1024;
+
+    // 1. 携带 resourceVersion 的 PATCH 遭遇 409，重读发现更大目标（2048Mi）已胜出 -> 幂等返回 resized: false 且绝不降级
+    fetchMock
+      .mockResolvedValueOnce(
+        pvcResponse({
+          uid: 'uid-1',
+          resourceVersion: '100',
+          requestedStorage: '512Mi',
+          capacityStorage: '512Mi'
+        })
+      )
+      .mockResolvedValueOnce(errorResponse(409, 'the object has been modified'))
+      .mockResolvedValueOnce(
+        pvcResponse({
+          uid: 'uid-1',
+          resourceVersion: '101',
+          requestedStorage: '2048Mi',
+          capacityStorage: '512Mi'
+        })
+      );
+
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '1536Mi' })).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      resized: false,
+      requestedBytes: 2048 * MIB,
+      capacityBytes: 512 * MIB
+    });
+    const [, firstPatchInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(String((firstPatchInit as RequestInit).body))).toEqual({
+      metadata: { resourceVersion: '100' },
+      spec: { resources: { requests: { storage: '1536Mi' } } }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // 2. 遭遇 409，重读发现较小目标（1024Mi）胜出 -> 使用最新 resourceVersion 重试 PATCH 并成功扩至 2048Mi
+    fetchMock.mockClear();
+    fetchMock
+      .mockResolvedValueOnce(
+        pvcResponse({
+          uid: 'uid-1',
+          resourceVersion: '200',
+          requestedStorage: '512Mi',
+          capacityStorage: '512Mi'
+        })
+      )
+      .mockResolvedValueOnce(errorResponse(409, 'the object has been modified'))
+      .mockResolvedValueOnce(
+        pvcResponse({
+          uid: 'uid-1',
+          resourceVersion: '201',
+          requestedStorage: '1024Mi',
+          capacityStorage: '512Mi'
+        })
+      )
+      .mockResolvedValueOnce(
+        pvcResponse({
+          uid: 'uid-1',
+          resourceVersion: '202',
+          requestedStorage: '2048Mi',
+          capacityStorage: '512Mi'
+        })
+      );
+
+    await expect(driver.resize(VOLUME_NAME, { storageSize: '2048Mi' })).resolves.toEqual({
+      claimName: VOLUME_NAME,
+      resized: true,
+      requestedBytes: 2048 * MIB,
+      capacityBytes: 512 * MIB
+    });
+    expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({
+      metadata: { resourceVersion: '200' },
+      spec: { resources: { requests: { storage: '2048Mi' } } }
+    });
+    expect(JSON.parse(String((fetchMock.mock.calls[3][1] as RequestInit).body))).toEqual({
+      metadata: { resourceVersion: '201' },
+      spec: { resources: { requests: { storage: '2048Mi' } } }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });

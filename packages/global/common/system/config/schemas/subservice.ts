@@ -79,6 +79,7 @@ const AgentSandboxSubserviceConfigSchema = z.strictObject({
       runtime: z.enum(['docker', 'kubernetes']).default('docker'),
       cpuOvercommitFactor: z.number().min(1).default(1),
       memoryOvercommitFactor: z.number().min(1).default(1),
+      enableDynamicPvcResize: z.boolean().default(false),
       image: textWithDefault(),
       useServerProxy: z.boolean().default(true),
       enableUpstreamProxy: z.boolean().default(false),

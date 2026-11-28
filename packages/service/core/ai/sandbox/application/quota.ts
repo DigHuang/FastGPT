@@ -1,16 +1,19 @@
 /**
- * 检查 Sandbox 激活配额与 Docker 卷容量软限制。
+ * 检查 Sandbox 激活配额与统一写前磁盘准备（Docker 软限制 / Kubernetes 动态 PVC 在线扩容）。
  *
  * - 激活配额：Mongo 活跃实例数是唯一计数来源；检查与后续写入之间允许存在并发窗口。
- * - 卷容量软限制：仅 Docker 运行时生效，以容器内 `fastgpt-ide-agent` `GET /disk-usage` 为单一真相源与缓存；
- *   Kubernetes 交由原生 PVC 控制，此处零开销直接放行。
+ * - 写前磁盘准备：
+ *   - Docker：以容器内 `fastgpt-ide-agent` `GET /disk-usage` 为单一真相源与缓存，超限拦截并降级 `RLIMIT_FSIZE`；
+ *   - Kubernetes（开启动态 PVC 扩容）：按 `statvfs` 水位自动在线扩容至 `storageSizeGi`，达上限后退回原生 PVC `ENOSPC`；
+ *   - Kubernetes（未开启动态 PVC 扩容）：零开销直接放行，完全交由原生 PVC 控制。
  */
 import { OPEN_SANDBOX_DEFAULT_HOME_PATH } from '@fastgpt/global/core/ai/sandbox/constants';
 import { getLogger, LogCategories } from '../../../../common/logger';
 import {
   getAgentSandboxCommonConfig,
   getAgentSandboxDiskBytes,
-  getAgentSandboxOpenSandboxConfig
+  getAgentSandboxOpenSandboxConfig,
+  isAgentSandboxDynamicPvcResizeEnabled
 } from '../config';
 import {
   countActiveSandboxInstances,
@@ -26,7 +29,8 @@ import {
   createAgentSandboxLimitReachedError,
   createAgentSandboxTeamLimitReachedError
 } from '../error';
-import { getSandboxDiskUsage, type IdeAgentEndpointClient } from './ideAgent';
+import { getSandboxDiskUsage, type SandboxDiskProbeClient } from './ideAgent';
+import { ensureSandboxPvcCapacity } from './pvcResize/service';
 
 const logger = getLogger(LogCategories.MODULE.AI.SANDBOX);
 
@@ -102,20 +106,44 @@ export function formatAgentDiskQuotaNotice(
   return `Sandbox disk quota exceeded (${usage}). Cannot create or modify files. sandbox_shell is currently in read/delete-only mode (RLIMIT_FSIZE=0; file writes are blocked by the kernel). ${guidance}.`;
 }
 
+/** 判断当前运行时配置是否需要在写入/命令执行前执行磁盘检查（Docker 软限制或 K8s 动态 PVC 扩容）。 */
+export function hasSandboxPreWriteDiskCheck(): boolean {
+  return (
+    getAgentSandboxOpenSandboxConfig().runtime === 'docker' ||
+    isAgentSandboxDynamicPvcResizeEnabled()
+  );
+}
+
 /**
- * 查询当前沙盒是否触发 Docker 卷容量软限制。
+ * 统一的沙盒写前磁盘准备入口：
+ * - Docker 运行时：通过容器内 `GET /disk-usage` 校验软限制配额并返回限额状态，探针异常默认 fail-open；
+ * - Kubernetes 运行时且开启动态 PVC 扩容：按 `statvfs` 水位自动触发在线扩容并短等待生效，
+ *   保持 `enabled: false`（不启用 Docker 软限制与 `RLIMIT_FSIZE`，达 `storageSizeGi` 上限后仍以原生 PVC `ENOSPC` 为准）；
+ * - Kubernetes 未开启动态 PVC 扩容：零开销直接返回。
  *
- * Kubernetes 直接返回 `enabled: false`；Docker 探针异常或超时时默认 fail-open 放行并记录告警，
  * 当在 `SandboxClient.runWithRecovery` 内传入 `rethrowRecoverable: true` 时透传可恢复传输异常以便自愈重建。
  */
-export async function getSandboxDiskQuotaStatus(
-  sandbox: IdeAgentEndpointClient,
-  options: { refresh?: boolean; signal?: AbortSignal; rethrowRecoverable?: boolean } = {}
+export async function prepareSandboxDiskForWrite(
+  sandbox: SandboxDiskProbeClient,
+  options: {
+    refresh?: boolean;
+    signal?: AbortSignal;
+    rethrowRecoverable?: boolean;
+    incomingBytes?: number;
+  } = {}
 ): Promise<SandboxDiskQuotaStatus> {
   const limitBytes = getAgentSandboxDiskBytes();
-  const enabled = getAgentSandboxOpenSandboxConfig().runtime === 'docker';
-  if (!enabled) {
-    return { enabled, exceeded: false, usedBytes: 0, limitBytes };
+  const opensandbox = getAgentSandboxOpenSandboxConfig();
+  if (opensandbox.runtime !== 'docker') {
+    if (isAgentSandboxDynamicPvcResizeEnabled()) {
+      await ensureSandboxPvcCapacity({
+        sandbox,
+        incomingBytes: options.incomingBytes,
+        signal: options.signal,
+        rethrowRecoverable: options.rethrowRecoverable
+      });
+    }
+    return { enabled: false, exceeded: false, usedBytes: 0, limitBytes };
   }
 
   try {
@@ -144,12 +172,17 @@ export async function getSandboxDiskQuotaStatus(
   }
 }
 
-/** 校验用户态写入口（上传、附件注入）是否允许写入；Docker 超限时抛出业务错误码。 */
+/** 校验用户态写入口（上传、附件注入）是否允许写入；Docker 超限时抛错，K8s 动态扩容开启时按需写前扩容。 */
 export async function assertSandboxWorkspaceWritable(
-  sandbox: IdeAgentEndpointClient,
-  options?: { refresh?: boolean; signal?: AbortSignal; rethrowRecoverable?: boolean }
+  sandbox: SandboxDiskProbeClient,
+  options?: {
+    refresh?: boolean;
+    signal?: AbortSignal;
+    rethrowRecoverable?: boolean;
+    incomingBytes?: number;
+  }
 ): Promise<void> {
-  const status = await getSandboxDiskQuotaStatus(sandbox, options);
+  const status = await prepareSandboxDiskForWrite(sandbox, options);
   if (status.exceeded) {
     throw createAgentSandboxDiskQuotaExceededError();
   }

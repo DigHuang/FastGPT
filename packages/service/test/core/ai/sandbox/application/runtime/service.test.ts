@@ -63,8 +63,10 @@ vi.mock(
     deleteSessionVolume: mocks.deleteVolume
   })
 );
-vi.mock('@fastgpt/service/core/ai/sandbox/config', () => ({
-  getAgentSandboxCommonConfig: () => ({ maxEditDebug: 100, maxPerTeam: 1 })
+vi.mock('@fastgpt/service/core/ai/sandbox/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@fastgpt/service/core/ai/sandbox/config')>()),
+  getAgentSandboxCommonConfig: () => ({ maxEditDebug: 100, maxPerTeam: 1 }),
+  isAgentSandboxDynamicPvcResizeEnabled: () => false
 }));
 vi.mock('@fastgpt/service/common/s3/sources/sandbox', () => ({
   buildSandboxArchiveObjectKey: (sandboxId: string, generation: string) =>

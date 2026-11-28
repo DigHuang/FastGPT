@@ -18,6 +18,7 @@ import {
 } from '@alibaba-group/opensandbox';
 import { createDataPlaneHeaders } from '@alibaba-group/opensandbox/internal';
 import { OPEN_SANDBOX_DEFAULT_ROOT_PATH } from '@fastgpt/global/core/ai/sandbox/constants';
+import { SANDBOX_WORKSPACE_VOLUME_NAME } from '@fastgpt/global/core/ai/sandbox/volume';
 import {
   batchRun,
   delayWithSignal,
@@ -121,6 +122,21 @@ function assertManagedSandboxOwner(info: SdkSandboxInfo, owner: SandboxOwner): v
   }
 }
 
+function createOpenSandboxConnection(params: {
+  baseUrl: string;
+  apiKey?: string;
+  useServerProxy?: boolean;
+  requestTimeoutSeconds?: number;
+}): ConnectionConfig {
+  return new ConnectionConfig({
+    domain: params.baseUrl,
+    apiKey: params.apiKey,
+    requestTimeoutSeconds: params.requestTimeoutSeconds ?? OPEN_SANDBOX_REQUEST_TIMEOUT_SECONDS,
+    debug: false,
+    useServerProxy: params.useServerProxy ?? true
+  }).withTransportIfMissing();
+}
+
 /**
  * 复用已初始化 transport 的 `ConnectionConfig`，每个超时层级仅保留一条最新配置的连接池，
  * 配置变更时主动关闭旧 transport 避免凭证与连接池泄漏。
@@ -142,13 +158,12 @@ function getSharedOpenSandboxConnection(params: {
     void existing.connection.closeTransport?.().catch(() => {});
   }
 
-  const created = new ConnectionConfig({
-    domain: params.baseUrl,
+  const created = createOpenSandboxConnection({
+    baseUrl: params.baseUrl,
     apiKey: params.apiKey,
     requestTimeoutSeconds,
-    debug: false,
     useServerProxy
-  }).withTransportIfMissing();
+  });
   sharedConnections.set(requestTimeoutSeconds, { key: cacheKey, connection: created });
   return created;
 }
@@ -172,17 +187,27 @@ export class OpenSandboxClient {
   private boundSandbox?: Sandbox;
   private remoteSandboxId?: SandboxId;
   private readonly connection: ConnectionConfig;
+  private readonly isolatedConnections: ConnectionConfig[] = [];
 
   constructor(
-    private readonly connectionConfig: OpenSandboxConnectionConfig,
+    private readonly connectionConfig: OpenSandboxConnectionConfig & {
+      isolatedConnection?: boolean;
+    },
     private readonly createConfig?: SandboxCreateSpec
   ) {
     this.remoteSandboxId = connectionConfig.remoteSandboxId;
-    this.connection = getSharedOpenSandboxConnection({
+    const connectionParams = {
       baseUrl: connectionConfig.baseUrl,
       apiKey: connectionConfig.apiKey,
       useServerProxy: connectionConfig.useServerProxy
-    });
+    };
+    if (connectionConfig.isolatedConnection) {
+      // 草稿配置探测等隔离场景必须创建独立 transport，绝不读写或关闭全局 sharedConnections 生产连接池。
+      this.connection = createOpenSandboxConnection(connectionParams);
+      this.isolatedConnections.push(this.connection);
+    } else {
+      this.connection = getSharedOpenSandboxConnection(connectionParams);
+    }
   }
 
   get rootPath(): string {
@@ -193,6 +218,13 @@ export class OpenSandboxClient {
 
   get id(): SandboxId | undefined {
     return this.boundSandbox?.id ?? this.remoteSandboxId;
+  }
+
+  /** 当前运行态连接绑定的 `$HOME` workspace PVC `claimName`（未配置挂载卷时返回 `undefined`）。 */
+  get workspaceClaimName(): string | undefined {
+    return this.createConfig?.volumes?.find(
+      (volume) => volume.name === SANDBOX_WORKSPACE_VOLUME_NAME
+    )?.pvc?.claimName;
   }
 
   protected normalizePath(path: string = ''): string {
@@ -654,14 +686,18 @@ export class OpenSandboxClient {
           }
         : undefined;
 
+    let isolatedCreateConnection: ConnectionConfig | undefined;
     try {
       throwIfAborted(options?.signal);
-      const createConnection = getSharedOpenSandboxConnection({
+      const createConnectionParams = {
         baseUrl: this.connectionConfig.baseUrl,
         apiKey: this.connectionConfig.apiKey,
         useServerProxy: this.connectionConfig.useServerProxy,
         requestTimeoutSeconds: OPEN_SANDBOX_CREATE_REQUEST_TIMEOUT_SECONDS
-      });
+      };
+      const createConnection = this.connectionConfig.isolatedConnection
+        ? (isolatedCreateConnection = createOpenSandboxConnection(createConnectionParams))
+        : getSharedOpenSandboxConnection(createConnectionParams);
       const sandbox = await Sandbox.create({
         connectionConfig: createConnection,
         skipHealthCheck: config.skipHealthCheck,
@@ -709,6 +745,11 @@ export class OpenSandboxClient {
           await sandbox.close().catch(() => {});
           throw rebindError;
         }
+        // rebind 失败时 boundTarget 仍持有 createConnection，纳入 isolatedConnections 待 close() 释放。
+        if (isolatedCreateConnection) {
+          this.isolatedConnections.push(isolatedCreateConnection);
+          isolatedCreateConnection = undefined;
+        }
       }
 
       await this.bind(boundTarget);
@@ -724,6 +765,10 @@ export class OpenSandboxClient {
         endpoint: this.connectionConfig.baseUrl,
         cause: error
       });
+    } finally {
+      if (isolatedCreateConnection) {
+        await isolatedCreateConnection.closeTransport?.().catch(() => {});
+      }
     }
   }
 
@@ -984,6 +1029,10 @@ export class OpenSandboxClient {
 
   async close(): Promise<void> {
     await this.releaseSandbox();
+    if (this.isolatedConnections.length > 0) {
+      const connections = this.isolatedConnections.splice(0);
+      await Promise.all(connections.map((conn) => conn.closeTransport?.().catch(() => {})));
+    }
   }
 
   async getEndpoint(port: number = DEFAULT_EXECD_PORT): Promise<Endpoint> {
@@ -1442,6 +1491,7 @@ function buildOpenSandboxClient(
     sandboxId: string;
     remoteSandboxId?: string;
     createConfig?: SandboxCreateSpec;
+    isolatedConnection?: boolean;
   }
 ): OpenSandboxClient {
   return new OpenSandboxClient(
@@ -1450,7 +1500,8 @@ function buildOpenSandboxClient(
       baseUrl: clientConfig.baseUrl,
       useServerProxy: clientConfig.useServerProxy,
       sessionId: props.sandboxId,
-      ...(props.remoteSandboxId ? { remoteSandboxId: props.remoteSandboxId } : {})
+      ...(props.remoteSandboxId ? { remoteSandboxId: props.remoteSandboxId } : {}),
+      ...(props.isolatedConnection ? { isolatedConnection: true } : {})
     },
     props.createConfig
   );
@@ -1464,6 +1515,7 @@ export function createRuntimeOpenSandboxClient(props: {
   volumes?: Volume[];
   createConfig?: SandboxCreateSpec;
   runtimeConfig?: OpenSandboxRuntimeConfig;
+  isolatedConnection?: boolean;
 }): OpenSandboxClient {
   const config =
     props.runtimeConfig ??
@@ -1476,6 +1528,7 @@ export function createRuntimeOpenSandboxClient(props: {
   return buildOpenSandboxClient(config.clientConfig, {
     sandboxId: props.sandboxId,
     remoteSandboxId: props.remoteSandboxId,
+    isolatedConnection: props.isolatedConnection,
     createConfig: {
       ...config.createConfig,
       ...(props.volumes !== undefined ? { volumes: props.volumes } : {})

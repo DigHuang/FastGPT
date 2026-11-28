@@ -3,13 +3,13 @@
  *
  * 只操作调用方传入的 sandbox/client，不创建、恢复或清理 sandbox 实例。
  */
-import type { WriteEntry } from '@alibaba-group/opensandbox';
 import { MAX_ARCHIVE_DEPTH } from '../constants';
 import type { OpenSandboxClient } from '../infrastructure/opensandbox/opensandbox';
 import { posix } from 'node:path';
 import { Readable } from 'node:stream';
 import type { SandboxClient } from './runtime/client';
 import { readExternalFileBuffer } from '../../../../common/file/read/external';
+import { isAgentSandboxDynamicPvcResizeEnabled } from '../config';
 import { assertSandboxWorkspaceWritable, rethrowSandboxDiskQuotaExceededError } from './quota';
 
 export type SandboxUrlFile = {
@@ -70,10 +70,20 @@ export async function writeUrlFilesToSandbox({
   const validFiles = files.filter(({ path }) => Boolean(path));
   if (validFiles.length === 0) return;
 
-  await assertSandboxWorkspaceWritable(sandbox);
-  const writeEntries: WriteEntry[] = await Promise.all(
+  const isDynamicPvcResize = isAgentSandboxDynamicPvcResizeEnabled();
+  // Docker 软限制需在下载远程文件前提前拦截超限；K8s 动态扩容等下载完成拿到准确总字节数后单次检查并一步扩到位。
+  if (!isDynamicPvcResize) {
+    await assertSandboxWorkspaceWritable(sandbox);
+  }
+  const writeEntries = await Promise.all(
     validFiles.map(({ path, url }) => readInputFile(url).then((data) => ({ path, data })))
   );
+  if (isDynamicPvcResize) {
+    const incomingBytes = writeEntries.reduce((sum, entry) => sum + entry.data.byteLength, 0);
+    await assertSandboxWorkspaceWritable(sandbox, {
+      ...(incomingBytes > 0 ? { incomingBytes } : {})
+    });
+  }
   try {
     await prepareSandboxFileParentDirectories(
       sandbox,

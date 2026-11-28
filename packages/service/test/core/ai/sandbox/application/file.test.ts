@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import { ChatSourceTypeEnum } from '@fastgpt/global/core/chat/constants';
 import { SandboxErrEnum } from '@fastgpt/global/common/error/code/sandbox';
 import { UserError } from '@fastgpt/global/common/error/utils';
+import {
+  createDefaultInstanceConfig,
+  getTestInstanceConfig
+} from '@test/utils/instanceConfigSnapshot';
 import { SandboxInstanceStatusEnum } from '@fastgpt/service/core/ai/sandbox/constants';
 import {
   addDirectoryToArchive,
@@ -10,6 +14,7 @@ import {
   resolveSandboxDownloadTarget,
   writeUrlFilesToSandbox
 } from '@fastgpt/service/core/ai/sandbox/application/file';
+import * as quotaModule from '@fastgpt/service/core/ai/sandbox/application/quota';
 import { resolveSandboxRuntimePath } from '@fastgpt/service/core/ai/sandbox/utils';
 import { SandboxClient } from '@fastgpt/service/core/ai/sandbox/application/runtime/client';
 import type { PreparedSandboxRuntime } from '@fastgpt/service/core/ai/sandbox/application/runtime/type';
@@ -181,6 +186,56 @@ describe('writeUrlFilesToSandbox', () => {
         readInputFile
       })
     ).rejects.toThrowError(new UserError(SandboxErrEnum.agentSandboxDiskQuotaExceeded));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    global.systemInstanceConfig = createDefaultInstanceConfig();
+  });
+
+  it('downloads files first and invokes assertSandboxWorkspaceWritable once with total incomingBytes when K8s dynamic PVC resize is enabled', async () => {
+    global.systemInstanceConfig = createDefaultInstanceConfig();
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.runtime = 'kubernetes';
+    getTestInstanceConfig().subservice.agentSandbox.opensandbox.enableDynamicPvcResize = true;
+
+    const callOrder: string[] = [];
+    const writableSpy = vi
+      .spyOn(quotaModule, 'assertSandboxWorkspaceWritable')
+      .mockImplementation(async () => {
+        callOrder.push('assertWritable');
+      });
+    const readInputFile = vi.fn(async (url: string) => {
+      callOrder.push(`read:${url}`);
+      return Buffer.from(url.endsWith('a.bin') ? '1234' : '567890');
+    });
+    const sandbox = {
+      createDirectories: vi.fn(async () => {
+        callOrder.push('createDirs');
+      }),
+      writeFiles: vi.fn(async () => {
+        callOrder.push('writeFiles');
+        return [];
+      })
+    };
+
+    await writeUrlFilesToSandbox({
+      sandbox: sandbox as any,
+      files: [
+        { path: '/workspace/a.bin', url: 'https://files.example.com/a.bin' },
+        { path: '/workspace/b.bin', url: 'https://files.example.com/b.bin' }
+      ],
+      readInputFile
+    });
+
+    expect(writableSpy).toHaveBeenCalledTimes(1);
+    expect(writableSpy).toHaveBeenCalledWith(sandbox, { incomingBytes: 10 });
+    expect(callOrder).toEqual([
+      'read:https://files.example.com/a.bin',
+      'read:https://files.example.com/b.bin',
+      'assertWritable',
+      'createDirs',
+      'writeFiles'
+    ]);
   });
 
   it('rejects relative input URLs instead of calling an internal axios', async () => {

@@ -16,12 +16,29 @@ import {
   SandboxVolumeEnsureResponseSchema,
   SandboxVolumeInspectResponseSchema,
   SandboxVolumeListResponseSchema,
-  SandboxVolumeNameSchema
+  SandboxVolumeNameSchema,
+  SandboxVolumeResizeResponseSchema,
+  type SandboxVolumeInspectResponse,
+  type SandboxVolumeResizeResponse
 } from '@fastgpt/global/core/ai/sandbox/volume';
 import type { Volume } from '@alibaba-group/opensandbox';
 import { shouldForwardAllowLegacyUnlabeled } from '../../legacy';
 import type { SandboxStorageType } from '../../type';
-import { getVolumeManagerEnvConfig } from './config';
+import { getVolumeManagerEnvConfig, type VolumeManagerConfig } from './config';
+
+/** volume-manager 非 2xx 响应的结构化异常，保留状态码与错误正文供调用方分类处理。 */
+export class VolumeManagerHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(params: { status: number; body: string; prefix?: string }) {
+    super(`${params.prefix ?? 'volume-manager error'}: ${params.status} ${params.body}`.trim());
+    this.name = 'VolumeManagerHttpError';
+    this.status = params.status;
+    this.body = params.body;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
 
 const ORPHAN_VOLUME_MARKER_PREFIX = 'agent-sandbox:orphan-volume';
 const VOLUME_MANAGER_REQUEST_TIMEOUT_MS = 350_000;
@@ -49,10 +66,10 @@ const requestVolumeManager = async ({
   errorPrefix = 'volume-manager error'
 }: {
   path: string;
-  method: 'GET' | 'POST' | 'DELETE';
-  vmConfig?: ReturnType<typeof getVolumeManagerEnvConfig>;
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  vmConfig?: VolumeManagerConfig;
   signal?: AbortSignal;
-  jsonBody?: (params: { storageSize: string }) => Record<string, unknown>;
+  jsonBody?: Record<string, unknown>;
   allowNotFound?: boolean;
   errorPrefix?: string;
 }): Promise<{ res: Response; volumeNamePrefix: string }> => {
@@ -67,20 +84,34 @@ const requestVolumeManager = async ({
     headers,
     signal: effectiveSignal,
     dispatcher: volumeManagerDispatcher,
-    ...(jsonBody
-      ? {
-          body: JSON.stringify(
-            jsonBody({
-              storageSize: vmConfig.storageSize
-            })
-          )
-        }
-      : {})
+    ...(jsonBody ? { body: JSON.stringify(jsonBody) } : {})
   } as RequestInit);
   if (!res.ok && !(allowNotFound && res.status === 404)) {
-    throw new Error(`${errorPrefix}: ${res.status} ${await res.text()}`);
+    throw new VolumeManagerHttpError({
+      status: res.status,
+      body: await res.text().catch(() => ''),
+      prefix: errorPrefix
+    });
   }
   return { res, volumeNamePrefix: vmConfig.volumeNamePrefix };
+};
+
+const parseVolumeResponse = async <T extends { claimName: string }>({
+  res,
+  schema,
+  expectedClaimName
+}: {
+  res: Response;
+  schema: { parse: (input: unknown) => T };
+  expectedClaimName: string;
+}): Promise<T> => {
+  const result = schema.parse(await res.json());
+  if (result.claimName !== expectedClaimName) {
+    throw new Error(
+      `volume-manager returned unexpected claimName: expected ${expectedClaimName}, received ${result.claimName}`
+    );
+  }
+  return result;
 };
 
 /**
@@ -159,15 +190,13 @@ export const createSessionVolumeClaimName = (params: {
 };
 
 /**
- * 只读核验指定持久卷已存在且归属当前 volume-manager（绝不触发新建卷）。
- *
- * 用于 4.18.0 存量 `/workspace` 卷迁移前校验：避免旧卷缺失时停掉旧容器或隐式创建空卷后提交空归档。
+ * 只读查询指定持久卷元数据、容量与 PVC 状态条件（绝不触发新建卷）。
  */
-export const assertSessionVolumeExists = async (
+export const inspectSessionVolume = async (
   claimName: string,
-  options?: { allowLegacyUnlabeled?: boolean; signal?: AbortSignal }
-): Promise<string> => {
-  const vmConfig = getVolumeManagerEnvConfig();
+  options?: { allowLegacyUnlabeled?: boolean; signal?: AbortSignal; vmConfig?: VolumeManagerConfig }
+): Promise<SandboxVolumeInspectResponse> => {
+  const vmConfig = options?.vmConfig ?? getVolumeManagerEnvConfig();
   const allowLegacyUnlabeled = shouldForwardAllowLegacyUnlabeled({
     claimName,
     volumeNamePrefix: vmConfig.volumeNamePrefix,
@@ -181,14 +210,22 @@ export const assertSessionVolumeExists = async (
     signal: options?.signal,
     errorPrefix: 'volume-manager inspect error'
   });
-  const result = SandboxVolumeInspectResponseSchema.parse(await res.json());
-  if (result.claimName !== claimName) {
-    throw new Error(
-      `volume-manager returned unexpected claimName: expected ${claimName}, received ${result.claimName}`
-    );
-  }
-  return result.claimName;
+  return parseVolumeResponse({
+    res,
+    schema: SandboxVolumeInspectResponseSchema,
+    expectedClaimName: claimName
+  });
 };
+
+/**
+ * 只读核验指定持久卷已存在且归属当前 volume-manager（绝不触发新建卷）。
+ *
+ * 用于 4.18.0 存量 `/workspace` 卷迁移前校验：避免旧卷缺失时停掉旧容器或隐式创建空卷后提交空归档。
+ */
+export const assertSessionVolumeExists = async (
+  claimName: string,
+  options?: { allowLegacyUnlabeled?: boolean; signal?: AbortSignal }
+): Promise<string> => (await inspectSessionVolume(claimName, options)).claimName;
 
 /**
  * 确保指定 sandbox 会话拥有可挂载的持久卷。
@@ -197,28 +234,51 @@ export const assertSessionVolumeExists = async (
  */
 export const ensureSessionVolume = async (
   claimName: string,
-  options?: { signal?: AbortSignal }
+  options?: { storageSize?: string; signal?: AbortSignal; vmConfig?: VolumeManagerConfig }
 ): Promise<string> => {
-  const vmConfig = getVolumeManagerEnvConfig();
+  const vmConfig = options?.vmConfig ?? getVolumeManagerEnvConfig();
   const { res } = await requestVolumeManager({
     path: '/v1/volumes/ensure',
     method: 'POST',
     vmConfig,
     signal: options?.signal,
-    jsonBody: ({ storageSize }) => ({
+    jsonBody: {
       claimName,
-      storageSize
-    })
+      storageSize: options?.storageSize ?? vmConfig.storageSize
+    }
   });
-  const result = SandboxVolumeEnsureResponseSchema.parse(await res.json());
-  if (result.claimName !== claimName) {
-    throw new Error(
-      `volume-manager returned unexpected claimName: expected ${claimName}, received ${result.claimName}`
-    );
-  }
+  const result = await parseVolumeResponse({
+    res,
+    schema: SandboxVolumeEnsureResponseSchema,
+    expectedClaimName: claimName
+  });
   // 清除可能残留的孤儿卷观察标记，防止新挂载/重挂卷被下一轮 GC 误删。
   await redisCacheAdapter.delete(getOrphanVolumeMarkerKey(result.claimName)).catch(() => undefined);
   return result.claimName;
+};
+
+/**
+ * 幂等扩容指定 sandbox 会话关联的 Kubernetes PVC。
+ */
+export const resizeSessionVolume = async (
+  claimName: string,
+  params: { storageSize: string; signal?: AbortSignal; vmConfig?: VolumeManagerConfig }
+): Promise<SandboxVolumeResizeResponse> => {
+  const { res } = await requestVolumeManager({
+    path: `/v1/volumes/${encodeURIComponent(claimName)}/resize`,
+    method: 'PATCH',
+    vmConfig: params.vmConfig,
+    signal: params.signal,
+    jsonBody: {
+      storageSize: params.storageSize
+    },
+    errorPrefix: 'volume-manager resize error'
+  });
+  return parseVolumeResponse({
+    res,
+    schema: SandboxVolumeResizeResponseSchema,
+    expectedClaimName: claimName
+  });
 };
 
 /**
@@ -230,22 +290,23 @@ export const ensureSessionVolume = async (
  */
 export const deleteSessionVolume = async (
   claimName: string,
-  options?: { allowLegacyUnlabeled?: boolean; signal?: AbortSignal }
+  options?: { allowLegacyUnlabeled?: boolean; signal?: AbortSignal; vmConfig?: VolumeManagerConfig }
 ): Promise<void> => {
-  const vmConfig = getVolumeManagerEnvConfig();
+  const vmConfig = options?.vmConfig ?? getVolumeManagerEnvConfig();
   const allowLegacyUnlabeled = shouldForwardAllowLegacyUnlabeled({
     claimName,
     volumeNamePrefix: vmConfig.volumeNamePrefix,
     allowLegacyUnlabeled: options?.allowLegacyUnlabeled
   });
   const query = allowLegacyUnlabeled ? '?allowLegacyUnlabeled=true' : '';
-  await requestVolumeManager({
+  const { res } = await requestVolumeManager({
     path: `/v1/volumes/${encodeURIComponent(claimName)}${query}`,
     method: 'DELETE',
     vmConfig,
     signal: options?.signal,
     allowNotFound: true
   });
+  await res.body?.cancel().catch(() => undefined);
   await redisCacheAdapter.delete(getOrphanVolumeMarkerKey(claimName)).catch(() => undefined);
 };
 
@@ -253,11 +314,9 @@ export const deleteSessionVolume = async (
  * 列出 volume-manager 中符合命名前缀的持久卷名称，供孤儿卷对账 GC 使用。
  */
 export const listSessionVolumes = async (options?: { signal?: AbortSignal }): Promise<string[]> => {
-  const vmConfig = getVolumeManagerEnvConfig();
   const { res, volumeNamePrefix } = await requestVolumeManager({
     path: '/v1/volumes',
     method: 'GET',
-    vmConfig,
     signal: options?.signal,
     errorPrefix: 'volume-manager list error'
   });
@@ -274,7 +333,7 @@ export const listSessionVolumes = async (options?: { signal?: AbortSignal }): Pr
  */
 export const getSessionVolumeConfig = async (
   claimName: string,
-  options?: { signal?: AbortSignal }
+  options?: { storageSize?: string; signal?: AbortSignal }
 ): Promise<VolumeManagerResult> => {
   const ensuredClaimName = await ensureSessionVolume(claimName, options);
   return buildVolumeConfig(ensuredClaimName);

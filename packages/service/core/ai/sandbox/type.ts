@@ -54,6 +54,8 @@ const SandboxArchiveInfoSchema = z.object({
   generation: z.string().min(1),
   format: z.literal('tar.zst'),
   sizeBytes: z.number().int().nonnegative(),
+  /** 归档前工作区占盘字节数（用于动态 PVC 扩容开启时的恢复建卷容量估算，历史归档缺省）。 */
+  uncompressedBytes: z.number().int().nonnegative().optional(),
   archivedAt: z.coerce.date()
 });
 export type SandboxArchiveInfoType = z.infer<typeof SandboxArchiveInfoSchema>;
